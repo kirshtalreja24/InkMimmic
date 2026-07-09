@@ -57,7 +57,10 @@ def preprocess(image_path: str) -> np.ndarray:
     if line_segments is not None:
         line_mask = np.zeros_like(binary)
         for seg in line_segments:
-            x1, y1, x2, y2 = seg[0]
+            pts = np.asarray(seg).reshape(-1)
+            if len(pts) < 4:
+                continue
+            x1, y1, x2, y2 = map(int, pts[:4])
             angle = abs(np.degrees(np.arctan2(y2 - y1, x2 - x1)))
             if angle < 10 or angle > 170:  # keep only near-horizontal segments
                 cv2.line(line_mask, (x1, y1), (x2, y2), 255, thickness=6)
