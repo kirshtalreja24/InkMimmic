@@ -1,0 +1,18 @@
+# InkMimic — DiffusionPen integration
+# Versions are loose on purpose (Phase 0 goal is "it runs"); pin exact
+# versions once Phase 0 succeeds and you know your CUDA/driver combo.
+
+torch>=2.0.0
+torchvision>=0.15.0
+diffusers>=0.21.0        # AutoencoderKL, DDIMScheduler
+transformers>=4.30.0     # CanineTokenizer, CanineModel
+timm>=0.9.0              # mobilenetv2_100 style encoder backbone
+einops>=0.6.0            # required by unet.py (rearrange/repeat)
+omegaconf>=2.3.0         # imported unconditionally inside UNetModel.__init__
+Pillow>=9.0.0
+numpy>=1.23.0
+tqdm>=4.65.0
+
+# Only needed if you clone the full repo and run its own train.py /
+# style_encoder_train.py rather than just importing unet.py + feature_extractor.py:
+# wandb
