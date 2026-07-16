@@ -1,146 +1,47 @@
 import argparse
 import csv
 import os
+import sys
 
 import cv2
 import numpy as np
-from skimage.filters import threshold_sauvola
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import preprocessing as _pp  # noqa: E402  -- must sit in the same folder as this file
 
 
 # ---------------------------------------------------------------------------
-# 1. Preprocessing
+# 1. Preprocessing -- delegates to preprocess.py (must be in this same folder)
 # ---------------------------------------------------------------------------
 #
-# Two entry points into a binary (ink=white, background=black) image:
-#
-# - preprocess(): takes a RAW photo/scan and runs its own denoise + Sauvola
-#   threshold + ruled-line removal. Use this when segment_handwriting.py is
-#   run directly against a photo.
-# - load_prebinarized(): takes an image that has ALREADY been binarized
-#   upstream (e.g. binary.png from preprocess_handwriting.py's full
-#   pipeline: perspective correction, deskew, CLAHE, shadow removal,
-#   Sauvola, ruled/grid-line removal, stroke repair). This is the actual
-#   fix for the "doesn't work on the processed binary.png" bug.
-#
-# The bug: running preprocess() on an already-binary image re-applies
-# bilateral filtering and Sauvola thresholding to input that is already
-# pure 0/255. Sauvola picks a threshold per pixel from the local mean and
-# standard deviation in a window around it -- built for a real grayscale
-# photo where brightness varies smoothly. On a strictly binary image,
-# every window is either all-background (std ~ 0, so the threshold
-# collapses right onto the mean and single pixels flip unpredictably) or
-# a hard bimodal ink/background split that isn't the smooth distribution
-# Sauvola assumes. In practice that eats strokes, adds speckle, or
-# reshapes character edges inconsistently -- i.e. exactly the "doesn't
-# work right on the binary.png" symptom. The fix is to never re-threshold
-# an image that's already binary: just load it and snap to clean 0/255.
+# This used to be an inline Sauvola+Hough implementation here. It's now a
+# thin wrapper around the dedicated preprocessing module (see preprocess.py),
+# which additionally handles deskew, CLAHE, shadow-gradient removal, and
+# page-type-aware ruled/grid line removal -- see that file's docstrings for
+# why each of those matters for real phone photos (shadow gradients breaking
+# a single threshold, curved ruled lines on a photographed rather than
+# flat-scanned notebook, etc).
 
 def preprocess(image_path: str, remove_ruled_lines: str = "auto") -> np.ndarray:
-    """Load a RAW image, denoise, and binarize so ink = white(255), background = black(0).
+    cfg = _pp.PreprocessConfig()
+    result = _pp.preprocess(image_path, cfg)
+    binary = result.binary
 
-    Two fixes vs. an earlier version of this function:
-
-    1. Ruled-line removal no longer eats handwriting. Ruled-line segments
-       must span most of the page width to be real notebook rules, so the
-       length threshold scales with image width (40%), and the whole step
-       is skipped unless ruled lines are actually detected
-       (remove_ruled_lines="auto").
-    2. No blind morphological opening. A (2,2) MORPH_OPEN on the whole
-       page erodes thin pen strokes before dilating them back, which
-       reliably punches gaps in fine ballpoint ink and fragments single
-       letters into 2-3 pieces. Noise removal is deferred to the
-       component-filtering stage, where it's done by connected-component
-       area instead of eroding every stroke on the page.
-    """
-    img = cv2.imread(image_path)
-    if img is None:
-        raise FileNotFoundError(f"Could not read image: {image_path}")
-
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    gray = cv2.bilateralFilter(gray, 5, 50, 50)  # denoise, keeps stroke edges sharp
-
-    local_thresh = threshold_sauvola(gray, window_size=35, k=0.18)
-    binary = ((gray < local_thresh).astype(np.uint8)) * 255
-
-    # Close 1px anti-aliasing gaps WITHOUT eroding first (closing only
-    # ever adds pixels, so it can't fragment a stroke the way opening did).
-    close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, close_kernel)
-
-    return remove_ruled_lines_if_present(binary, remove_ruled_lines)
-
-
-def load_prebinarized(image_path: str) -> np.ndarray:
-    """Load an image that has already been reduced to ink/background by an
-    upstream pipeline (e.g. preprocess_handwriting.py's binary.png).
-
-    No grayscale conversion, no bilateral filter, no Sauvola -- all of
-    that already happened upstream and re-running it is what broke
-    segmentation. This just reads it back and snaps to clean 0/255 in
-    case PNG compression introduced any near-white/near-black noise at
-    edges, so downstream connected-component logic sees a strict binary
-    mask rather than stray gray values.
-    """
-    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        raise FileNotFoundError(f"Could not read image: {image_path}")
-    _, binary = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
-    return binary
-
-
-def looks_prebinarized(image_path: str) -> bool:
-    """Heuristic for --input_is_binary auto: true if the image is (almost)
-    strictly two-valued, i.e. it's already gone through a binarization
-    step rather than being a raw grayscale/color photo."""
-    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        return False
-    near_binary = np.isin(img, [0, 255])
-    return bool(near_binary.mean() > 0.995)
-
-
-def remove_ruled_lines_if_present(binary: np.ndarray, remove_ruled_lines: str = "auto") -> np.ndarray:
-    """Detect and optionally strip full-width straight ruled lines from an
-    already-binary image. Shared by both preprocess() and the
-    already-binarized path, since remove_ruled_lines="always" should work
-    the same way regardless of which loader produced the binary image.
-
-    Ruled-line segments must span most of the page width (40%) to count,
-    so ordinary cursive baseline connectors ("th", "ov", "wn"...), which
-    are dead straight but short, are never mistaken for notebook rules.
-    """
-    close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
-    img_w = binary.shape[1]
-    min_line_len = int(img_w * 0.4)
-
-    line_segments = cv2.HoughLinesP(
-        binary, 1, np.pi / 360, threshold=200,
-        minLineLength=min_line_len, maxLineGap=20,
-    )
-
-    has_ruled_lines = False
-    if line_segments is not None:
-        horiz = 0
-        for seg in line_segments:
-            x1, y1, x2, y2 = map(int, np.asarray(seg).reshape(-1)[:4])
-            angle = abs(np.degrees(np.arctan2(y2 - y1, x2 - x1)))
-            if angle < 3 or angle > 177:
-                horiz += 1
-        has_ruled_lines = horiz >= 2  # a couple of full-width straight rules
-
-    do_remove = (remove_ruled_lines == "always") or (
-        remove_ruled_lines == "auto" and has_ruled_lines
-    )
-
-    if do_remove and line_segments is not None:
-        line_mask = np.zeros_like(binary)
-        for seg in line_segments:
-            x1, y1, x2, y2 = map(int, np.asarray(seg).reshape(-1)[:4])
-            angle = abs(np.degrees(np.arctan2(y2 - y1, x2 - x1)))
-            if angle < 3 or angle > 177:
-                cv2.line(line_mask, (x1, y1), (x2, y2), 255, thickness=4)
-        binary = cv2.subtract(binary, line_mask)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, close_kernel)
+    if remove_ruled_lines == "never" and result.page_type in ("ruled", "grid"):
+        # Caller explicitly opted out of line removal even though the page
+        # has ruling -- re-run without it. (Re-threshold is cheap enough
+        # not to bother threading a flag through the whole module for
+        # this one case.)
+        cfg2 = _pp.PreprocessConfig(auto_detect_lines=False)
+        binary = _pp.preprocess(image_path, cfg2).binary
+    elif remove_ruled_lines == "always" and result.page_type == "blank":
+        # Force line removal even though auto-detection found nothing --
+        # rare (e.g. very faint ruling), but keep the escape hatch.
+        n, _, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+        heights = [stats[i][3] for i in range(1, n) if stats[i][4] >= 15]
+        mh = float(np.median(heights)) if heights else None
+        binary = _pp.remove_ruled_lines(binary, mh)
+        binary = _pp.repair_strokes(binary)
 
     return binary
 
@@ -204,7 +105,7 @@ def find_blobs(binary: np.ndarray, min_area: int = 12):
 
 
 # ---------------------------------------------------------------------------
-# 3. Lines -> words
+# 3. Lines -> words (same clustering idea as before, kept because it works)
 # ---------------------------------------------------------------------------
 
 def group_into_lines(blobs, gap_factor: float = 1.2):
@@ -246,14 +147,21 @@ def group_into_lines(blobs, gap_factor: float = 1.2):
 
 
 # ---------------------------------------------------------------------------
-# 4. Split touching/ligature-joined blobs into characters
+# 4. THE MISSING STEP: split touching/ligature-joined blobs into characters
 # ---------------------------------------------------------------------------
 #
-# Splitting connected handwritten glyphs with 100% accuracy is an open
-# problem. What we can do reliably is the classic vertical-projection-
-# profile cut: within a word blob, ink density per column dips at the
-# "neck" between two letters even when they're technically touching, and
-# a smoothed local-minimum finder can locate those necks.
+# This is what the old pipeline never did. find_char_boxes() only ever
+# merged blobs together (for diacritics); nothing ever cut a blob apart.
+# So the moment two letters were pen-joined -- which happens constantly
+# in ordinary handwriting, even print-style -- they were saved as a
+# single "character" image forever. Splitting connected handwritten
+# glyphs with 100% accuracy is an open problem (that's why production
+# handwriting recognition, CRNN+CTC etc., avoids doing it explicitly at
+# all -- see the note at the bottom). What we CAN do reliably is the
+# classic vertical-projection-profile cut: within a word blob, ink
+# density per column dips at the "neck" between two letters even when
+# they're technically touching, and a smoothed local-minimum finder can
+# locate those necks.
 
 def _typical_char_width(blobs, median_h):
     """Estimate a single character's width from blobs in this line that
@@ -382,10 +290,30 @@ def save_character_png(binary_full, box, out_path, padding: int = 4):
 # 6. Full pipeline
 # ---------------------------------------------------------------------------
 
+def _line_is_isolated(line_blobs, median_w):
+    """Heuristic for mode="auto": on a specimen/reference sheet every blob
+    is its own letter with deliberate whitespace, so the gap between
+    consecutive blobs is consistently large relative to letter width. In
+    prose, most gaps are the tight spacing *within* a word (letters
+    touching or nearly so) with only occasional wider word-breaks, so the
+    per-line median gap stays small. Needs a few blobs to be a meaningful
+    sample; with fewer, default to prose (the safer assumption for the
+    common case of a short line of writing)."""
+    if len(line_blobs) < 4:
+        return False
+    by_x = sorted(line_blobs, key=lambda b: b[0])
+    gaps = [by_x[i + 1][0] - (by_x[i][0] + by_x[i][2]) for i in range(len(by_x) - 1)]
+    return float(np.median(gaps)) > median_w * 0.55
+
+
 def segment_handwriting(image_path: str, output_dir: str, remove_ruled_lines: str = "auto",
-                         debug_overlay: bool = False, mode: str = "prose",
-                         input_is_binary: str = "auto"):
+                         debug_overlay: bool = False, mode: str = "auto"):
     """
+    mode="auto"     -- (default) decides per line of text using the gap
+                        between letters relative to their width. You
+                        shouldn't need to touch this for a normal photo;
+                        it's here mainly as an override for borderline
+                        cases.
     mode="prose"    -- continuous handwriting (sentences, paragraphs) where
                         letters are routinely pen-joined within a word.
                         Runs the width/valley character-splitting heuristic.
@@ -393,33 +321,18 @@ def segment_handwriting(image_path: str, output_dir: str, remove_ruled_lines: st
                         written with deliberate whitespace around it (e.g. an
                         alphabet practice sheet, or one-letter-per-box capture
                         UI). Skips splitting entirely and saves each blob as
-                        one character. Wide-but-single letters like m/w/H/K/z
-                        produce the exact same "wide blob + internal low-ink
-                        valley" signature as two touching letters do, so the
-                        same heuristic that correctly separates joined
-                        cursive will incorrectly slice these apart when
-                        nothing was ever touching in the first place. If your
-                        capture flow already guarantees one glyph per blob,
-                        isolated mode is strictly more correct.
-
-    input_is_binary="auto"   -- detect whether image_path is already a pure
-                                 ink/background binary (e.g. binary.png from
-                                 preprocess_handwriting.py) and skip re-running
-                                 Sauvola/bilateral on it if so.
-    input_is_binary="yes"    -- force the already-binarized load path.
-    input_is_binary="no"     -- force the raw-photo preprocess() path.
+                        one character. See the note above split_into_characters
+                        for why this matters: wide-but-single letters like
+                        m/w/H/K/z produce the exact same "wide blob + internal
+                        low-ink valley" signature as two touching letters do,
+                        so the same heuristic that correctly separates joined
+                        cursive will incorrectly slice these apart when nothing
+                        was ever touching in the first place. If your capture
+                        flow already guarantees one glyph per blob, isolated
+                        mode is strictly more correct.
     """
     os.makedirs(output_dir, exist_ok=True)
-
-    use_prebinarized = (input_is_binary == "yes") or (
-        input_is_binary == "auto" and looks_prebinarized(image_path)
-    )
-
-    if use_prebinarized:
-        binary = load_prebinarized(image_path)
-        binary = remove_ruled_lines_if_present(binary, remove_ruled_lines)
-    else:
-        binary = preprocess(image_path, remove_ruled_lines=remove_ruled_lines)
+    binary = preprocess(image_path, remove_ruled_lines=remove_ruled_lines)
 
     blobs = find_blobs(binary)
     lines = group_into_lines(blobs)
@@ -434,7 +347,11 @@ def segment_handwriting(image_path: str, output_dir: str, remove_ruled_lines: st
         typical_w = _typical_char_width(line_blobs, median_h)
         min_char_w = max(typical_w * 0.45, 6)
 
-        if mode == "isolated":
+        line_mode = mode
+        if line_mode == "auto":
+            line_mode = "isolated" if _line_is_isolated(line_blobs, typical_w) else "prose"
+
+        if line_mode == "isolated":
             # Rebuild glyphs straight from the line's blobs (see
             # group_isolated_glyphs for why word-level clustering isn't
             # used here), then present each as its own single-character
@@ -489,17 +406,13 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", default="./chars")
     parser.add_argument("--remove_ruled_lines", choices=["auto", "always", "never"], default="auto")
     parser.add_argument("--debug_overlay", action="store_true")
-    parser.add_argument("--mode", choices=["prose", "isolated"], default="prose",
-                         help="'prose' splits touching letters within joined handwriting "
-                              "(sentences/paragraphs). 'isolated' skips splitting -- use for "
-                              "reference/specimen sheets where each glyph already has its own "
-                              "whitespace (e.g. an alphabet practice sheet).")
-    parser.add_argument("--input_is_binary", choices=["auto", "yes", "no"], default="auto",
-                         help="'auto' detects whether --input is already a pure binary image "
-                              "(e.g. binary.png from preprocess_handwriting.py) and skips "
-                              "re-running Sauvola/bilateral filtering on it if so. Force with "
-                              "'yes'/'no' if the auto-detection guesses wrong.")
+    parser.add_argument("--mode", choices=["auto", "prose", "isolated"], default="auto",
+                         help="'auto' (default) decides per line. 'prose' forces the "
+                              "touching-letter split heuristic (sentences/paragraphs). "
+                              "'isolated' forces no splitting (reference/specimen sheets "
+                              "where each glyph already has its own whitespace, e.g. an "
+                              "alphabet practice sheet).")
     args = parser.parse_args()
 
     segment_handwriting(args.input, args.output_dir, args.remove_ruled_lines,
-                         args.debug_overlay, args.mode, args.input_is_binary)
+                         args.debug_overlay, args.mode)

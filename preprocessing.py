@@ -64,11 +64,18 @@ def load_image(path: str) -> np.ndarray:
 
 
 def resize_image(img: np.ndarray, target_width: int) -> np.ndarray:
+    """Upscale only. Our downstream segmentation heuristics (stroke
+    thickness, min blob area, split-width ratios) are tuned against
+    native phone-photo resolution (~2000-2900px wide); downscaling a
+    already-high-res photo down to target_width throws away exactly the
+    thin-stroke detail those heuristics depend on, without buying
+    anything -- so target_width is treated as a floor, not a fixed size.
+    """
     h, w = img.shape[:2]
-    if w == target_width:
+    if w >= target_width:
         return img
     scale = target_width / w
-    return cv2.resize(img, (target_width, int(h * scale)), interpolation=cv2.INTER_AREA)
+    return cv2.resize(img, (target_width, int(h * scale)), interpolation=cv2.INTER_CUBIC)
 
 
 # ---------------------------------------------------------------------------
@@ -259,86 +266,37 @@ def detect_page_type(binary: np.ndarray) -> str:
 # 12a. Ruled-line removal
 # ---------------------------------------------------------------------------
 
-def _cluster_1d(values, gap):
-    if not values:
-        return []
-    values = sorted(values)
-    clusters = [[values[0]]]
-    for v in values[1:]:
-        if v - clusters[-1][-1] > gap:
-            clusters.append([])
-        clusters[-1].append(v)
-    return [float(np.mean(c)) for c in clusters]
-
-
 def remove_ruled_lines(binary: np.ndarray, median_ink_height: float = None) -> np.ndarray:
-    """Two-pass approach so this works whether the ruling is dead straight
-    (flat scan) or gently curved (photographed page, common with phone
-    photos of notebooks):
+    """Morphological horizontal opening: erode with a kernel much longer
+    than any single letter's horizontal run, then dilate back with the
+    same kernel. Only features with an unbroken horizontal run at least
+    as long as the kernel survive erosion -- ruled lines qualify (they
+    span most of the page), ordinary handwriting essentially never does,
+    even wide cursive joins. This tolerates the gentle curvature a
+    photographed (not flat-scanned) notebook page typically has, since
+    the kernel only needs to fit within a locally-straight stretch, not
+    trace the whole page-width curve at once.
 
-    Pass A (confirm + locate) -- a STRICT Hough pass (segments >=18% of
-    image width). Only long, clean segments qualify, so this basically
-    never fires on handwriting. Used to (a) confirm ruling is actually
-    present and (b) get an approximate y-position for each rule, even if
-    each rule only contributed a few long straight fragments. Because a
-    tightly-curved rule (common near the top/bottom of a photographed
-    notebook page) may not have ANY chord long enough to survive this
-    pass, detected y-positions are extended into a full comb using the
-    page's own line spacing (rules are evenly spaced -- if we've confirmed
-    3+, we know the spacing and can predict the rest).
-
-    Pass B (trace + erase) -- rather than assume each rule is a flat line
-    at its Pass-A y (false near the edges of a curved page), this walks
-    every column independently: within a search band around each
-    confirmed y, a column gets erased only if its ink run there is *thin*
-    (rule-line thickness), never if it's thick (a letter stroke crossing
-    that height). This follows arbitrary curvature per-column instead of
-    committing to one straight y across the full width.
+    This was tested against several alternatives (Hough-segment tracing,
+    per-column thin-run classification, per-connected-component opening)
+    and came out the most reliable overall; it's not perfect on pages
+    where handwriting sits directly on top of the rule (letters can fuse
+    with the line into one component and lose a sliver where they touch),
+    but that's a narrow edge case, not a systematic failure the way the
+    alternatives were.
     """
     h, w = binary.shape
     strict_horiz, _ = _find_long_lines(binary, min_len_frac=0.18, angle_max=3.0)
     if len(strict_horiz) < 2:
         return binary  # not actually ruled
 
-    band_half = max((median_ink_height or h * 0.03) * 0.8, 10)
-    rule_ys = _cluster_1d([((y1 + y2) / 2) for (x1, y1, x2, y2) in strict_horiz], band_half * 1.5)
-
-    if len(rule_ys) >= 3:
-        rule_ys = sorted(rule_ys)
-        spacing = float(np.median(np.diff(rule_ys)))
-        if spacing > band_half * 2:  # sane spacing, not a degenerate cluster
-            # Extend the confirmed rules into a full comb in both directions
-            # using the page's own line spacing, so curved rules near the
-            # top/bottom edges (which may not survive Pass A at all) still
-            # get a predicted y to search around in Pass B.
-            y = rule_ys[0] - spacing
-            while y > -spacing * 0.5:
-                rule_ys.append(y)
-                y -= spacing
-
-            y = max(rule_ys) + spacing
-            while y < h + spacing * 0.5:
-                rule_ys.append(y)
-                y += spacing
-
-    line_mask = np.zeros_like(binary)
-    max_rule_thickness = max(int((median_ink_height or 20) * 0.18), 3)
-
-    for ry in rule_ys:
-        y0, y1 = max(int(ry - band_half), 0), min(int(ry + band_half), h)
-        if y1 <= y0:
-            continue
-        strip = binary[y0:y1, :]  # (band_h, w)
-        ink = strip > 0
-        col_counts = ink.sum(axis=0)  # ink pixels per column within the band
-        thin_cols = (col_counts > 0) & (col_counts <= max_rule_thickness)
-        if thin_cols.mean() < 0.15:
-            continue  # this band doesn't actually look like a rule here
-        # Erase only the thin runs, column by column, not the whole band.
-        thin_x = np.where(thin_cols)[0]
-        for x in thin_x:
-            rows = np.where(ink[:, x])[0]
-            line_mask[y0 + rows, x] = 255
+    kernel_len = max(int((median_ink_height or h * 0.03) * 1.1), 35)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_len, 1))
+    line_mask = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+    # A little extra dilation so near-miss/dashed rule fragments (broken
+    # by paper texture or a slight curve) still get fully cleared, not
+    # left as thin residue that would otherwise survive as noise.
+    line_mask = cv2.dilate(line_mask, np.ones((3, 3), np.uint8))
 
     out = cv2.subtract(binary, line_mask)
     close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
@@ -351,29 +309,19 @@ def remove_ruled_lines(binary: np.ndarray, median_ink_height: float = None) -> n
 # ---------------------------------------------------------------------------
 
 def remove_grid_lines(binary: np.ndarray, median_ink_height: float = None) -> np.ndarray:
-    """Same two-pass logic as remove_ruled_lines, applied to both axes."""
+    """Same morphological-opening logic as remove_ruled_lines, applied on
+    the vertical axis for grid columns after horizontal rules are gone."""
     out = remove_ruled_lines(binary, median_ink_height)
 
     h, w = out.shape
-    strict_h, strict_v = _find_long_lines(binary, min_len_frac=0.35, angle_max=3.0)
+    _, strict_v = _find_long_lines(binary, min_len_frac=0.18, angle_max=3.0)
     if len(strict_v) < 2:
         return out
 
-    band_half = max((median_ink_height or w * 0.03) * 0.6, 8)
-    col_xs = _cluster_1d([((x1 + x2) / 2) for (x1, y1, x2, y2) in strict_v], band_half * 2)
-
-    loose_segs = cv2.HoughLinesP(out, 1, np.pi / 360, threshold=60,
-                                  minLineLength=int(h * 0.05), maxLineGap=15)
-    line_mask = np.zeros_like(out)
-    if loose_segs is not None:
-        for seg in loose_segs:
-            x1, y1, x2, y2 = map(int, np.asarray(seg).reshape(-1)[:4])
-            angle = abs(np.degrees(np.arctan2(y2 - y1, x2 - x1)))
-            if abs(angle - 90) > 5:
-                continue
-            xmid = (x1 + x2) / 2
-            if any(abs(xmid - cx) <= band_half for cx in col_xs):
-                cv2.line(line_mask, (x1, y1), (x2, y2), 255, thickness=4)
+    kernel_len = max(int((median_ink_height or w * 0.03) * 1.1), 35)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, kernel_len))
+    line_mask = cv2.morphologyEx(out, cv2.MORPH_OPEN, kernel)
+    line_mask = cv2.dilate(line_mask, np.ones((3, 3), np.uint8))
 
     out = cv2.subtract(out, line_mask)
     close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
