@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+training/emnist_data/
+dataset_auto/
+.DS_Store
+.env
