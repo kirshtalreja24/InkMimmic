@@ -4,4 +4,3 @@ __pycache__/
 training/emnist_data/
 dataset_auto/
 .DS_Store
-.env

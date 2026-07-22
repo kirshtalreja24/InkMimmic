@@ -1,0 +1,350 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Caveat:wght@400..700&family=Homemade+Apple&family=Sacramento&family=Patrick+Hand&family=Reenie+Beanie&display=swap');
+@import "tailwindcss";
+
+:root {
+  /* Curator's Periwinkle & Butter Alabaster Palette */
+  --bg-base: #FAF9FC;           /* Warm Ivory & Lavender White */
+  --bg-card: rgba(255, 255, 255, 0.78);
+  
+  /* Primary Theme Pastels (Curated Periwinkle & Yellow Tones) */
+  --periwinkle-light: #E8EAFB;
+  --periwinkle: #C7CCF0;
+  --periwinkle-dark: #A5ADE3;
+  --periwinkle-glow: #6B74C4;      
+  --periwinkle-glow-hover: #5860A8;
+  --yellow-glow: #F5C742;          
+  --butter-light: #FFF9DB;          
+  --butter: #FFF3B0;
+  --butter-dark: #FFE985;
+
+  /* Typography Slate */
+  --text-main: #2C3545;         /* Deep Slate Gray */
+  --text-muted: #5E697F;        /* Cool Charcoal */
+  --text-light: #90A0B7;        /* Platinum Gray */
+  
+  /* Soft Neumorphic & Glow Borders */
+  --border-light: rgba(107, 116, 196, 0.12);
+  --border-focus: rgba(107, 116, 196, 0.35);
+  
+  /* Elevation Shadows */
+  --shadow-sm: 0 4px 8px rgba(107, 116, 196, 0.03);
+  
+  /* Pillowy 3D Clay Shadows (Makes components look touchable and highly stylized) */
+  --shadow-clay-primary: 
+    0 10px 25px -5px rgba(107, 116, 196, 0.35),
+    inset 0 3px 6px rgba(255, 255, 255, 0.95),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.06);
+  --shadow-clay-secondary: 
+    0 8px 20px -5px rgba(94, 105, 127, 0.12),
+    inset 0 2px 4px rgba(255, 255, 255, 0.95),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.04);
+  --shadow-paper: 
+    0 4px 15px rgba(0, 0, 0, 0.02),
+    0 15px 45px rgba(107, 116, 196, 0.08),
+    inset 0 0 1px rgba(0, 0, 0, 0.04);
+
+  /* Curve Radii */
+  --radius-sm: 12px;
+  --radius-md: 20px;
+  --radius-lg: 32px;
+  
+  /* Speeds */
+  --ease-elastic: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --transition-normal: 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  --transition-fast: 0.15s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  background-color: var(--bg-base);
+  color: var(--text-main);
+  min-height: 100vh;
+  overflow-x: hidden;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Base mesh animations (Yellow + Periwinkle) */
+.pastel-bg-grid {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: -10;
+  background-image: 
+    radial-gradient(circle at 10% 15%, var(--periwinkle-light) 0%, transparent 40%),
+    radial-gradient(circle at 85% 10%, var(--butter-light) 0%, transparent 40%),
+    radial-gradient(circle at 75% 85%, var(--periwinkle) 0%, transparent 40%),
+    radial-gradient(circle at 25% 75%, var(--butter) 0%, transparent 40%),
+    radial-gradient(circle at 50% 50%, var(--butter-light) 0%, transparent 40%);
+  background-size: 150% 150%;
+  animation: bgOrbit 16s ease-in-out infinite alternate;
+}
+
+@keyframes bgOrbit {
+  0% { background-position: 0% 0%; }
+  100% { background-position: 100% 100%; }
+}
+
+/* Floating animation */
+@keyframes float {
+  0% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(0.5deg); }
+  100% { transform: translateY(0px) rotate(0deg); }
+}
+
+.animate-float {
+  animation: float 7s ease-in-out infinite;
+}
+
+/* Glassmorphism Panel styles */
+.glass-panel {
+  background: var(--bg-card);
+  backdrop-filter: blur(20px) saturate(120%);
+  -webkit-backdrop-filter: blur(20px) saturate(120%);
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  box-shadow: 0 10px 30px -5px rgba(107, 116, 196, 0.05), var(--shadow-sm);
+  border-radius: var(--radius-md);
+  transition: all var(--transition-normal);
+}
+
+/* ==========================================================================
+   HIGHLY STYLIZED INPUTS & BUTTONS (The core polish upgrade)
+   ========================================================================== */
+
+/* 1. Pillowy 3D Claymorphic Buttons */
+.btn-primary {
+  background: linear-gradient(135deg, var(--periwinkle-glow) 0%, var(--periwinkle-glow-hover) 100%);
+  color: #FFFFFF !important;
+  border: none;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  font-size: 0.85rem;
+  padding: 14px 28px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-clay-primary);
+  cursor: pointer;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 
+    0 14px 30px -4px rgba(107, 116, 196, 0.45),
+    inset 0 3px 6px rgba(255, 255, 255, 0.95),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.08);
+  filter: brightness(1.05);
+}
+
+.btn-primary:active {
+  transform: translateY(1px);
+  box-shadow: 
+    0 4px 10px -2px rgba(107, 116, 196, 0.3),
+    inset 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--text-main) !important;
+  border: 1px solid rgba(107, 116, 196, 0.15);
+  font-weight: 700;
+  font-size: 0.85rem;
+  padding: 13px 26px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-clay-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-secondary:hover {
+  background: #FFFFFF;
+  border-color: var(--periwinkle-glow);
+  color: var(--periwinkle-glow) !important;
+  transform: translateY(-2px);
+  box-shadow: 
+    0 12px 25px -5px rgba(107, 116, 196, 0.15),
+    inset 0 2px 4px rgba(255, 255, 255, 0.95),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.btn-secondary:active {
+  transform: translateY(1px);
+}
+
+/* 2. Custom Select Fields */
+select, .select-field {
+  appearance: none;
+  background-color: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(107, 116, 196, 0.15);
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 12px 40px 12px 16px;
+  box-shadow: var(--shadow-sm), inset 0 1px 1px rgba(255, 255, 255, 0.9);
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236B74C4' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 14px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+select:hover, .select-field:hover {
+  border-color: var(--periwinkle-glow);
+  background-color: #FFFFFF;
+  box-shadow: 0 4px 10px rgba(107, 116, 196, 0.06);
+}
+
+select:focus, .select-field:focus {
+  outline: none;
+  border-color: var(--periwinkle-glow);
+  box-shadow: 0 0 0 3px rgba(107, 116, 196, 0.2);
+}
+
+/* 3. Sleek Custom Input Fields */
+input[type="text"], input[type="email"], input[type="password"], textarea {
+  background-color: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(107, 116, 196, 0.15);
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 12px 16px;
+  box-shadow: var(--shadow-sm), inset 0 1px 2px rgba(107, 116, 196, 0.03);
+  transition: all var(--transition-fast);
+}
+
+input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focus, textarea:focus {
+  outline: none;
+  background-color: #FFFFFF;
+  border-color: var(--periwinkle-glow);
+  box-shadow: 
+    0 0 0 4px rgba(107, 116, 196, 0.15),
+    inset 0 1px 2px rgba(107, 116, 196, 0.02);
+}
+
+/* 4. Elegant Custom Ranges (Sliders) */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  width: 100%;
+  padding: 8px 0;
+}
+
+/* Slider Track */
+input[type="range"]::-webkit-slider-runnable-track {
+  background: var(--periwinkle);
+  height: 6px;
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+}
+
+/* Slider Thumb */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: #FFFFFF;
+  border: 4px solid var(--periwinkle-glow);
+  height: 20px;
+  width: 20px;
+  border-radius: var(--radius-full);
+  margin-top: -7px;
+  box-shadow: 0 4px 8px rgba(107, 116, 196, 0.3);
+  transition: transform var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  border-color: var(--periwinkle-glow-hover);
+  box-shadow: 0 6px 12px rgba(107, 116, 196, 0.4);
+}
+
+/* 5. Custom File Extractor Box */
+.drag-drop-zone-active {
+  border-color: var(--periwinkle-glow) !important;
+  background-color: var(--periwinkle-light) !important;
+  box-shadow: inset 0 2px 10px rgba(107, 116, 196, 0.08) !important;
+}
+
+/* ==========================================================================
+   PREMIUM STATIONERY DETAILS (The Paper Sheet View)
+   ========================================================================== */
+
+.paper-lined, .paper-grid, .paper-plain {
+  border-radius: 4px;
+  box-shadow: var(--shadow-paper) !important;
+  position: relative;
+  transition: all var(--transition-normal);
+}
+
+/* Double stack papers details */
+.paper-lined::before, .paper-grid::before, .paper-plain::before {
+  content: '';
+  position: absolute;
+  z-index: -2;
+  bottom: -8px;
+  right: -8px;
+  left: 8px;
+  top: 8px;
+  background: #FFFFFC;
+  border-radius: 4px;
+  box-shadow: 3px 3px 12px rgba(0,0,0,0.02);
+  border: 1px solid rgba(0,0,0,0.02);
+}
+
+/* Notebook paper pink divider margin line */
+.paper-lined::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 90px;
+  width: 2px;
+  background-color: rgba(239, 83, 80, 0.25);
+  pointer-events: none;
+}
+
+/* Realistic Ink Colors with slight shadow dispersion */
+.ink-blue {
+  color: #1a3a80 !important;
+  text-shadow: 0.4px 0.4px 0.2px rgba(26, 58, 128, 0.2);
+}
+
+.ink-black {
+  color: #212529 !important;
+  text-shadow: 0.4px 0.4px 0.2px rgba(33, 37, 41, 0.2);
+}
+
+.ink-red {
+  color: #922b2b !important;
+  text-shadow: 0.4px 0.4px 0.2px rgba(146, 43, 43, 0.2);
+}
+
+.ink-green {
+  color: #1b4d3e !important;
+  text-shadow: 0.4px 0.4px 0.2px rgba(27, 77, 62, 0.2);
+}
+
+/* Modern Glowing Typography text */
+.glow-text-primary {
+  background: linear-gradient(135deg, var(--periwinkle-glow) 0%, var(--yellow-glow) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}

@@ -1,0 +1,6 @@
+/* Clear default styles to use design system from index.css */
+.app-container {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
