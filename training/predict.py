@@ -1,11 +1,15 @@
 """
-predict.py -- run the trained classifier on a single image, print top-3 guesses.
+predict.py — run the trained classifier on a single image, print top-3 guesses.
+
+Usage:
+    python predict.py --checkpoint classifier.pt --image path/to/char.png
 """
 
 import argparse
 import torch
 import torch.nn.functional as F
 from torchvision import transforms
+from PIL import ImageOps
 
 from dataset import _load_as_grayscale, pad_to_square
 from classifier import SmallCNN
@@ -27,6 +31,8 @@ def main():
 
     tfm = transforms.Compose([
         transforms.Lambda(lambda img: pad_to_square(img, 32)),
+        transforms.Lambda(lambda img: ImageOps.invert(img)),  # match EMNIST's
+        # white-ink-on-black convention (our images are dark ink on white)
         transforms.ToTensor(),
         transforms.Normalize((0.5,), (0.5,)),
     ])
