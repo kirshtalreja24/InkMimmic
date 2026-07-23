@@ -36,7 +36,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split
 
-from dataset import CharacterDataset, DEFAULT_CLASSES, _load_as_grayscale
+from dataset import CharacterDataset, DEFAULT_CLASSES, _load_as_grayscale, pad_to_square
 from torchvision import transforms
 
 
@@ -124,7 +124,7 @@ def auto_label(args):
     model.eval()
 
     tfm = transforms.Compose([
-        transforms.Resize((32, 32)),
+        transforms.Lambda(lambda img: pad_to_square(img, 32, fill=0)),
         transforms.ToTensor(),
         transforms.Normalize((0.5,), (0.5,)),
     ])
