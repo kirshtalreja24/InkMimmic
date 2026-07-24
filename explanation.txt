@@ -1,0 +1,419 @@
+================================================================================
+                    AI HANDWRITER PROJECT — FULL EXPLANATION
+================================================================================
+
+WHAT THIS PROJECT IS
+--------------------
+This is a personalized AI handwriting generation system (Final Year Project).
+It takes photos of someone's handwritten pages, segments them into individual
+character images, lets you label those characters, trains a GAN model on the
+labeled dataset, and then generates new handwritten text in that person's
+handwriting style.
+
+The end goal: type any text -> get an image of that text written in YOUR
+handwriting.
+
+================================================================================
+
+PROJECT PIPELINE (7 stages, top to bottom)
+-------------------------------------------
+
+STAGE 1: CAPTURE
+  Take phone photos of handwritten pages (letters, numbers, sentences).
+  Input images are stored in: data/<person_name>/
+
+  Currently collected samples from: alizeh, kirsh, mayra, random
+
+STAGE 2: PREPROCESSING (preprocessing.py)
+  Converts raw phone photos into clean binary images (ink=white, bg=black).
+
+  Full pipeline:
+    1. Load image
+    2. Resize (only upscales if image is smaller than 2000px target width)
+    3. Document detection + perspective correction (4-corner warp, only if
+       page edges are visible and plausible)
+    4. Border removal (crops dark scanner edges if detected)
+    5. Deskew (Hough line analysis to find and correct page rotation)
+    6. CLAHE (local contrast enhancement for low-contrast scans)
+    7. Shadow removal (median blur background estimation, divide out gradient)
+    8. Denoise (bilateral filter — preserves stroke edges)
+    9. Sauvola adaptive thresholding (local threshold per pixel, handles
+       uneven lighting that global thresholds can't)
+   10. Page type detection (blank / ruled / grid paper)
+   11. Ruled/grid line removal (morphological horizontal opening — only
+       features spanning >18% of page width survive erosion)
+   12. Stroke repair (morphological close to bridge tiny gaps)
+
+  Key design decisions documented in preprocessing_spec.md
+  Handles: phone camera perspective, shadows, ruled notebooks, graph paper,
+           uneven lighting, different pen colors, JPEG artifacts
+
+STAGE 3: CHARACTER SEGMENTATION (segment.py)
+  Splits the clean binary image into individual character PNG files.
+
+  Pipeline:
+    1. Run preprocessing (delegates to preprocessing.py)
+    2. Connected component analysis (find all ink blobs)
+    3. Auto-split blobs into "real ink" vs "noise" populations using Otsu's
+       method on blob heights (handles grainy phone photos)
+    4. Merge small diacritics (dots on i/j, crossbars on t) onto nearby
+       real strokes
+    5. Group blobs into lines (vertical center clustering, gap = 1.2x median
+       character height)
+    6. Group blobs within lines into words (x-gap clustering, gap = 1.3x
+       median width)
+    7. MODE DECISION per line:
+       - "auto": detects if line is prose (pen-joined) or isolated (spaced)
+       - "prose": runs vertical-projection-profile character splitting to
+         separate touching/ligature-joined letters
+       - "isolated": no splitting (for alphabet specimen sheets)
+    8. Character splitting (for prose mode):
+       - Compute vertical ink-density profile across word blob
+       - Smooth profile to avoid cutting inside letters
+       - Find local minima (valleys between characters)
+       - Cut at the best N-1 valley positions
+    9. Save each character as transparent RGBA PNG (ink in alpha channel)
+   10. Write manifest.csv with filename, line, word, char index, bbox coords
+
+  Two versions exist:
+    - segment.py: current version with auto/prose/isolated modes
+    - segment2.py: older version (all code commented out, has inline
+      preprocessing instead of importing preprocessing.py)
+
+STAGE 4: LABELING (labeling/label_app.py)
+  Interactive Streamlit web app for manually labeling character crops.
+
+  How it works:
+    - Shows each character PNG one at a time, scaled 4x for legibility
+    - You type a single character label (A-Z, a-z, 0-9) and hit Enter
+    - File is COPIED (not moved) into dataset/<label>/<original_filename>.png
+    - Already-labeled files are auto-detected and skipped
+    - "Skip" button puts junk crops into dataset/_junk/
+    - Safe to close/reopen across sessions — tracks progress via filesystem
+
+  Run: streamlit run labeling/label_app.py -- --chars_dir ../chars --dataset_dir ../dataset
+
+STAGE 4.5: AUTO-LABELING (training/classifier.py)
+  Train a CNN classifier on your hand-labeled data, then use it to
+  auto-label new batches of raw crops — massively speeds up dataset building.
+
+  Two modes:
+    1. train: Train SmallCNN on labeled dataset/
+    2. auto_label: Run trained model on new chars/, sort predictions into
+       dataset_auto/<label>/ (high confidence) or _low_confidence/ (manual review)
+
+STAGE 5: TRAINING
+
+  5a. CLASSIFIER (training/classifier.py)
+      SmallCNN architecture:
+        - 3 conv blocks (32->64->128 channels) with BatchNorm + ReLU
+        - MaxPool downsampling (32x32 -> 16x16 -> 8x8)
+        - AdaptiveAvgPool -> Linear(128, 62)
+        - 62 classes: A-Z, a-z, 0-9
+      Trained with Adam optimizer, cross-entropy loss, 15% validation split.
+
+  5b. EMNIST PRE-TRAINING (training/train_emnist.py)
+      Same SmallCNN trained on EMNIST ByClass (700k+ real handwritten chars,
+      62 classes) downloaded from HuggingFace. Then optionally fine-tunes on
+      your own labeled data. This gives much better results when your own
+      dataset is small.
+
+  5c. GAN TRAINING (training/gan.py)
+      DCGAN-style class-conditional GAN:
+        Generator:
+          - Input: noise(100) + label_embed(32) = 132 dims
+          - Project -> 256x4x4 -> ConvTranspose 4->8->16->32 -> Tanh
+          - Output: 1x32x32 grayscale image
+        Discriminator:
+          - Input: image(1x32x32) + label_channel(1x32x32) = 2 channels
+          - Conv 32->16->8->4 -> 1 (real/fake)
+        Training: BCEWithLogitsLoss, Adam(lr=2e-4, betas=(0.5, 0.999))
+        Personalization: all training images come from YOUR handwriting,
+        so the generator learns YOUR specific style.
+
+  5d. SUPPORTING UTILITIES:
+      - dataset.py: Shared PyTorch Dataset (reads dataset/<label>/*.png,
+        composites alpha onto white, pads to square, normalizes to [-1,1])
+      - predict.py: Run trained classifier on single image, print top-3
+      - batch_test.py: Quick spot-check — one sample per class folder
+      - normalize_scale.py: Rescale character crops to uniform size
+        (for consistent scale across different handwriting samples)
+      - sort_case.py: Interactive tool to split uppercase/lowercase on
+        case-insensitive filesystems
+
+STAGE 6: TEXT GENERATION (generation/generate.py)
+  Takes typed text + trained generator checkpoint -> handwriting image.
+
+  Pipeline:
+    1. Load generator from checkpoint
+    2. For each character in input text:
+       - Generate random noise vector z
+       - Look up character's class index
+       - G(z, class_label) -> 32x32 grayscale glyph
+    3. Compose left-to-right onto white canvas:
+       - Fixed letter spacing (4px default)
+       - Fixed space width (24px default)
+       - Simple concatenation (no baseline jitter/rotation/ligatures yet)
+
+  Missing characters (punctuation etc.) rendered as blanks with a warning.
+
+STAGE 7: (FUTURE) Refinement
+  Not yet implemented:
+  - Per-character baseline variation
+  - Slight rotation per character
+  - Variable spacing based on letter shapes
+  - Ligatures between letters
+  - Diffusion model (Phase 2, higher quality than GAN)
+
+================================================================================
+
+FILE STRUCTURE
+--------------
+
+D:\ai_handwritter.dot\
+|
+|-- preprocessing.py          # Stage 2: Image preprocessing pipeline (ACTIVE)
+|-- preprocessing_spec.md     # Design spec for preprocessing module
+|-- segment.py                # Stage 3: Character segmentation (ACTIVE, current)
+|-- segment2.py               # Stage 3: Old version (all commented out + inline)
+|-- testa.py                  # Stage 3: Even older version (fully commented out)
+|
+|-- PRD.md                    # Product Requirements Document
+|-- README.md                 # Project overview
+|-- handwriting_fyp_roadmap.md # FYP roadmap with next steps
+|-- requirements.txt          # Python dependencies
+|-- stuff.txt                 # Quick notes
+|
+|-- data/                     # Raw handwriting photos
+|   |-- alizeh/               # 5 photos (IMG_8589, IMG_8590, etc.)
+|   |-- kirsh/                # 1 photo (IMG_8884)
+|   |-- mayra/                # 2 photos
+|   |-- random/               # 4 photos (ahuja, heer, s1, sanjna)
+|
+|-- chars/                    # Stage 3 output: segmented character PNGs
+|   |-- manifest.csv          # Metadata for each character
+|   |-- _debug_overlay.png    # Debug visualization
+|   |-- line01_word01_char01.png ... line06_word04_char11.png
+|
+|-- chars1/                   # Another segmentation output (aa_s2 prefix)
+|   |-- manifest.csv
+|   |-- _debug_overlay.png
+|
+|-- dataset/                  # Stage 4 output: labeled character folders
+|   |-- 0/ 1/ 2/ ... 9/      # Digit classes
+|   |-- a/ b/ c/ ... z/       # Lowercase letter classes
+|   |-- A/ B/ C/ ... Z/       # Uppercase letter classes (some may be empty)
+|   |-- _junk/                # Rejected crops
+|
+|-- labeling/
+|   |-- label_app.py          # Stage 4: Streamlit labeling UI
+|
+|-- training/
+|   |-- classifier.py         # Stage 5a: CNN classifier (train + auto_label)
+|   |-- dataset.py            # Stage 5: Shared PyTorch Dataset class
+|   |-- train_emnist.py       # Stage 5b: EMNIST pre-training + fine-tuning
+|   |-- gan.py                # Stage 5c: Conditional GAN (Generator + Discriminator)
+|   |-- predict.py            # Stage 5: Single-image prediction
+|   |-- batch_test.py         # Stage 5: Quick per-class spot-check
+|   |-- normalize_scale.py    # Stage 5: Scale normalization utility
+|   |-- sort_case.py          # Stage 5: Case-splitting utility (macOS)
+|   |-- requirements.txt      # Full pip freeze of training environment
+|   |-- venv/                 # Python virtual environment
+|   |-- samples/              # GAN sample grids (created during training)
+|
+|-- generation/
+|   |-- generate.py           # Stage 6: Text-to-handwriting image
+
+================================================================================
+
+DEPENDENCIES
+------------
+Root requirements.txt (main project):
+  - torch>=2.0.0, torchvision>=0.15.0    (PyTorch for ML)
+  - opencv-python>=4.8.0                  (image processing)
+  - Pillow>=10.0.0                        (image I/O)
+  - scikit-image>=0.21.0                  (Sauvola thresholding)
+  - numpy>=1.24.0                         (array operations)
+  - streamlit>=1.28.0                     (labeling web UI)
+  - huggingface-hub>=0.20.0               (EMNIST dataset download)
+
+Training requirements.txt has a full pip freeze (torch 2.2.2, etc.)
+
+================================================================================
+
+COMMANDS TO RUN THIS PROJECT
+=============================
+
+PREREQUISITES
+-------------
+1. Install Python 3.10+ (tested on Windows)
+2. Create and activate a virtual environment:
+
+   cd D:\ai_handwritter.dot
+   python -m venv venv
+   venv\Scripts\activate        # Windows (cmd)
+   # OR: source venv/Scripts/activate  # Git Bash
+
+3. Install dependencies:
+
+   pip install -r requirements.txt
+
+
+STEP 1: PREPROCESS + SEGMENT A HANDWRITING IMAGE
+-------------------------------------------------
+Using segment.py (current version with auto mode):
+
+   python segment.py --input data/kirsh/IMG_8884.jpeg --output_dir chars
+
+Options:
+   --remove_ruled_lines auto|always|never   (default: auto)
+   --debug_overlay                          (saves _debug_overlay.png)
+   --mode auto|prose|isolated               (default: auto)
+
+   # For a ruled notebook page:
+   python segment.py --input data/alizeh/IMG_8589.jpeg --output_dir chars --remove_ruled_lines always --debug_overlay
+
+   # For alphabet specimen sheet (each letter already isolated):
+   python segment.py --input data/alizeh/IMG_8591.jpeg --output_dir chars --mode isolated
+
+To run just the preprocessing separately:
+   python preprocessing.py --input data/kirsh/IMG_8884.jpeg --output_dir processed --debug
+
+
+STEP 2: LABEL THE SEGMENTED CHARACTERS
+---------------------------------------
+Launch the Streamlit labeling app:
+
+   streamlit run labeling/label_app.py -- --chars_dir ../chars --dataset_dir ../dataset
+
+Opens at http://localhost:8501
+- Type a character label (A-Z, a-z, 0-9) and press Enter
+- Click "Skip" for junk/noise crops
+- Already-labeled files are auto-skipped
+- Close and reopen anytime — progress is preserved
+
+Alternatively, for a quick alternative (commented out in segment2.py, would
+need segment2.py to be used instead of segment.py).
+
+
+STEP 3: (OPTIONAL) TRAIN CLASSIFIER FOR AUTO-LABELING
+------------------------------------------------------
+Train on your hand-labeled dataset:
+
+   cd training
+   python classifier.py train --dataset_dir ../dataset --epochs 15 --out classifier.pt
+
+Use trained classifier to auto-label a new batch of raw crops:
+
+   python classifier.py auto_label --checkpoint classifier.pt --chars_dir ../chars1 --out_dir ../dataset_auto --min_confidence 0.6
+
+Review auto-labeled results:
+   streamlit run labeling/label_app.py -- --chars_dir ../dataset_auto/_low_confidence --dataset_dir ../dataset
+
+
+STEP 4: (OPTIONAL) PRE-TRAIN ON EMNIST + FINE-TUNE
+----------------------------------------------------
+Download EMNIST ByClass and train the same SmallCNN:
+
+   cd training
+   python train_emnist.py --epochs 5 --out classifier_emnist.pt
+
+Fine-tune on your own labeled data:
+
+   python train_emnist.py --epochs 5 --out classifier_emnist.pt --finetune_dir ../dataset --finetune_epochs 10
+
+Quick spot-check the classifier:
+
+   python batch_test.py --checkpoint classifier_emnist.pt --dataset_dir ../dataset
+
+
+STEP 5: PREDICT WITH CLASSIFIER
+--------------------------------
+Single image prediction:
+
+   cd training
+   python predict.py --checkpoint classifier_emnist.pt --image ../chars/line01_word01_char01.png
+
+
+STEP 6: TRAIN THE GAN (HANDWRITING GENERATOR)
+----------------------------------------------
+   cd training
+   python gan.py --dataset_dir ../dataset --epochs 200 --out generator.pt
+
+Options:
+   --batch_size 32        (default)
+   --lr 2e-4              (default)
+   --sample_every 10      (save sample grids every N epochs)
+   --checkpoint_every 20  (save checkpoint every N epochs)
+   --sample_dir samples   (directory for sample grids)
+
+Monitor training by looking at images in training/samples/epoch_*.png
+
+NOTE: GPU strongly recommended. 200 epochs on CPU will be very slow.
+      Use Google Colab for GPU access.
+
+
+STEP 7: GENERATE HANDWRITING FROM TEXT
+---------------------------------------
+   cd generation
+   python generate.py --checkpoint ../training/generator.pt --text "Hello World" --output out.png
+
+Options:
+   --letter_spacing 4     (pixels between characters)
+   --space_width 24       (pixels for a space character)
+   --seed 42              (reproducible output — different seed = different look)
+
+Each run with the same text produces a different-looking (but same-style)
+handwriting image, because each character is generated from fresh random noise.
+
+
+STEP 8: UTILITY COMMANDS
+--------------------------
+Normalize character crops to uniform scale:
+   cd training
+   python normalize_scale.py --chars_dir ../chars --output_dir ../chars_normalized
+
+Split case on case-insensitive filesystem (macOS):
+   python sort_case.py --letter a --src ../dataset/a --dest ../dataset_split
+
+
+QUICK START (minimal commands)
+-------------------------------
+If you just want to test the full pipeline end-to-end:
+
+   cd D:\ai_handwritter.dot
+   python -m venv venv
+   venv\Scripts\activate
+   pip install -r requirements.txt
+
+   # Segment a page
+   python segment.py --input data/kirsh/IMG_8884.jpeg --output_dir chars
+
+   # Label (manually in browser)
+   streamlit run labeling/label_app.py -- --chars_dir ../chars --dataset_dir ../dataset
+
+   # Train GAN (after labeling enough characters)
+   cd training
+   python gan.py --dataset_dir ../dataset --epochs 200
+
+   # Generate text
+   cd ../generation
+   python generate.py --checkpoint ../training/generator.pt --text "Hello World" --output out.png
+
+================================================================================
+
+CURRENT STATUS
+--------------
+- Preprocessing pipeline: DONE and working
+- Character segmentation: DONE and working (prose + isolated modes)
+- Labeling UI: DONE (Streamlit app)
+- Classifier: DONE (SmallCNN, EMNIST pre-training)
+- GAN generator: DONE (DCGAN-style conditional GAN)
+- Text generation: DONE (basic left-to-right concatenation)
+- Baseline variation / ligatures / advanced composition: NOT YET
+- Diffusion model (Phase 2): NOT YET
+
+Dataset progress: some labeled samples exist in dataset/ for digits 0-9
+and letters a-f. The project is ready for more labeling -> training cycles.
+
+================================================================================

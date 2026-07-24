@@ -32,7 +32,7 @@ WORKFLOW
 
 from __future__ import annotations
 
-import argparse
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -41,18 +41,41 @@ import streamlit as st
 from PIL import Image
 
 VALID_LABELS = list("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+VALID_CHARS = set(VALID_LABELS)
 
 
 def parse_args():
-    # Streamlit swallows argv itself, so custom args must come after `--`
-    if "--" in sys.argv:
-        argv = sys.argv[sys.argv.index("--") + 1:]
-    else:
-        argv = []
-    p = argparse.ArgumentParser()
-    p.add_argument("--chars_dir", default="../chars", help="Folder of segment.py's raw output PNGs.")
-    p.add_argument("--dataset_dir", default="../dataset", help="Output folder, organized as dataset/<label>/*.png")
-    return p.parse_args(argv)
+    # Streamlit consumes everything after "--" in sys.argv, so command-line
+    # args like "--chars_dir ../chars5" are only visible via sys.argv here.
+    # Treat relative paths as relative to this script's location so the
+    # examples in this file work regardless of the launch directory.
+    script_dir = Path(__file__).resolve().parent
+
+    def _arg(name, default):
+        """Return env var CHARSDIR / DATASETDIR, then sys.argv, then default."""
+        env_key = name.upper()  # --chars_dir -> CHARSDIR
+        if env_key in os.environ:
+            return os.environ[env_key]
+        # sys.argv fallback: search for --chars_dir ... in the raw argv
+        raw = sys.argv[1:]
+        for i, tok in enumerate(raw):
+            if tok == f"--{name}" and i + 1 < len(raw):
+                return raw[i + 1]
+        return default
+
+    def _resolve(path_str: str) -> str:
+        path = Path(path_str)
+        if path.is_absolute():
+            return str(path)
+        return str((script_dir / path).resolve())
+
+    class _Args:
+        pass
+
+    args = _Args()
+    args.chars_dir = _resolve(_arg("chars_dir", "../chars5"))
+    args.dataset_dir = _resolve(_arg("dataset_dir", "../dataset"))
+    return args
 
 
 def already_labeled_filenames(dataset_dir: Path) -> set[str]:
@@ -110,13 +133,13 @@ def main():
         st.rerun()
 
     with st.form(key="label_form", clear_on_submit=True):
-        label = st.text_input("Label (single character)", max_chars=1)
+        label = st.text_input("Label (one or two characters)", max_chars=2)
         submitted = st.form_submit_button("Save & next")
         if submitted:
-            if label in VALID_LABELS:
+            if 1 <= len(label) <= 2 and all(ch in VALID_CHARS for ch in label):
                 commit_label(label)
             elif label:
-                st.warning(f"'{label}' isn't A-Z, a-z, or 0-9 — not saved.")
+                st.warning(f"'{label}' must be 1 or 2 characters from A-Z, a-z, or 0-9 — not saved.")
 
     if st.button("Skip (not a real character / junk crop)"):
         # Recorded in its own bucket rather than silently discarded, so

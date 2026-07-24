@@ -36,7 +36,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split
 
-from dataset import CharacterDataset, DEFAULT_CLASSES, _load_as_grayscale, pad_to_square
+from dataset import CharacterDataset, DEFAULT_CLASSES, _load_as_grayscale, pad_to_square, label_to_folder
 from torchvision import transforms
 
 
@@ -149,7 +149,7 @@ def auto_label(args):
             label = classes[pred_idx.item()]
 
             if conf >= args.min_confidence:
-                dest = out_dir / label
+                dest = out_dir / label_to_folder(label)
                 n_confident += 1
             else:
                 # Uncertain predictions go in their own bucket for manual

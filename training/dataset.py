@@ -33,6 +33,35 @@ DEFAULT_CLASSES = list(
 )
 
 
+def folder_to_label(folder_name: str) -> str:
+    """Map a dataset folder name to the real character label.
+
+    On Windows, folder names are case-insensitive, so you can't have both
+    'a/' and 'A/' in the same directory.  The workaround is to name
+    uppercase folders with a doubled letter (AA, BB, … ZZ) and let this
+    function translate them back to the real single-character label.
+
+    Lowercase folders (a-z), digit folders (0-9), and already-single-letter
+    uppercase folders pass through unchanged.
+    """
+    # Double-letter uppercase folder  →  single-letter label  (AA -> A, BB -> B, …)
+    if len(folder_name) == 2 and folder_name.isalpha() and folder_name.isupper():
+        return folder_name[0]
+    return folder_name
+
+
+def label_to_folder(label: str) -> str:
+    """Map a real character label to a Windows-safe folder name (inverse of folder_to_label).
+
+    Uppercase letters get doubled (A -> AA, B -> BB, …) because Windows
+    treats 'a' and 'A' as the same folder name.  Lowercase and digits
+    pass through unchanged.
+    """
+    if label.isupper() and len(label) == 1:
+        return label * 2  # A -> AA, B -> BB, …
+    return label
+
+
 def _load_as_grayscale(path: Path) -> Image.Image:
     """Composite transparent ink-mask PNGs onto white, then grayscale.
     Falls back gracefully if the image has no alpha channel at all."""
@@ -78,10 +107,12 @@ class CharacterDataset(Dataset):
         self.class_to_idx = {c: i for i, c in enumerate(self.classes)}
 
         self.samples: list[tuple[Path, int]] = []
+        self.folder_to_label = folder_to_label  # expose for external use
         for cls in found:
-            if cls not in self.class_to_idx:
+            label = folder_to_label(cls)
+            if label not in self.class_to_idx:
                 continue  # unexpected folder name, e.g. a typo -- skip, don't crash
-            idx = self.class_to_idx[cls]
+            idx = self.class_to_idx[label]
             for f in (self.dataset_dir / cls).glob("*.png"):
                 self.samples.append((f, idx))
 

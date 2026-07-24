@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 from torchvision import transforms
 from PIL import ImageOps
-from dataset import _load_as_grayscale, pad_to_square, IGNORED_DIRS
+from dataset import _load_as_grayscale, pad_to_square, IGNORED_DIRS, folder_to_label
 from classifier import SmallCNN
 def main():
     p = argparse.ArgumentParser()
@@ -38,7 +38,7 @@ def main():
         if not pngs:
             continue
         img_path = pngs[0]
-        true_label = cls_dir.name
+        true_label = folder_to_label(cls_dir.name)
         img = _load_as_grayscale(img_path)
         x = tfm(img).unsqueeze(0).to(device)
         with torch.no_grad():
