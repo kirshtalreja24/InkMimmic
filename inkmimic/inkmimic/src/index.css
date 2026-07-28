@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-ink-700/60;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-ink-950 text-parchment font-body antialiased;
+  }
+
+  h1, h2, h3, h4 {
+    @apply font-display text-parchment;
+  }
+
+  :focus-visible {
+    outline: 2px solid #FFC93C;
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background: rgba(242, 183, 5, 0.35);
+    color: #F6F1E6;
+  }
+}
+
+@layer components {
+  .ink-panel {
+    @apply bg-ink-900/70 border border-royal-500/20 rounded-2xl backdrop-blur-sm;
+  }
+
+  .paper-panel {
+    @apply bg-parchment text-ink-950 rounded-2xl shadow-panel;
+  }
+
+  .btn-gold {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-gold-400 px-6 py-3
+      font-body font-semibold text-ink-950 transition-all duration-200
+      hover:bg-gold-300 hover:shadow-gold active:scale-[0.98];
+  }
+
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-parchment/30 px-6 py-3
+      font-body font-semibold text-parchment transition-all duration-200
+      hover:border-gold-400 hover:text-gold-300 active:scale-[0.98];
+  }
+
+  .field-label {
+    @apply block text-sm font-medium text-parchment/70 mb-2;
+  }
+
+  .field-input {
+    @apply w-full rounded-xl bg-ink-950/60 border border-royal-500/30 px-4 py-3 text-parchment
+      placeholder:text-parchment/30 focus:border-gold-400/70 transition-colors;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
