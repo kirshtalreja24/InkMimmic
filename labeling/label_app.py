@@ -73,7 +73,7 @@ def parse_args():
         pass
 
     args = _Args()
-    args.chars_dir = _resolve(_arg("chars_dir", "../chars5"))
+    args.chars_dir = _resolve(_arg("chars_dir", "../chars9"))
     args.dataset_dir = _resolve(_arg("dataset_dir", "../dataset"))
     return args
 
