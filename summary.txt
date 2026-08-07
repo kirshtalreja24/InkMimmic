@@ -1,0 +1,279 @@
+================================================================================
+                      AI HANDWRITER — MODEL & DATA AUDIT
+================================================================================
+Date: 2026-08-05
+
+>>> ADDENDUM 2026-08-08 — per-user fine-tuning pipeline built (supersedes parts
+>>> of this audit). The project now has: stroke_reconstruct.py (photos -> approx
+>>> online strokes), build_train_data.py (-> train_strokes.p in preprocess_data
+>>> format), finetune.py (decoder-only, low-LR, loads IAM base), renderer.py +
+>>> generate_page.py (full-page generation with best-of-N legibility gate), and
+>>> a local Streamlit web app (app/app.py) that runs upload -> segment ->
+>>> transcribe -> reconstruct -> fine-tune -> generate. Env: ONE unified venv
+>>> (requirements-app.txt, TF>=2.16 + torch), which supersedes §4.1's "separate
+>>> TF venv" (the app imports both frameworks in one process). §4.2 Option B
+>>> (reconstruct from photos) was chosen as the capture strategy. Cleanup per
+>>> §5 done: dead code archived to docs/archive/, stale chars* runs deleted
+>>> (chars9 kept), redundant classifier checkpoints archived
+>>> (classifier_final4.pt + classifier_emnist.pt kept), generated artifacts
+>>> deleted. README.md and INTEGRATION_GUIDE.md updated. Fidelity caveat from
+>>> §3 x8 still applies: frozen MobileNetV2 caps per-glyph fidelity even after
+>>> fine-tuning.
+================================================================================
+Scope: diffusion_model/ (the generation model) + training/ + preprocessing /
+       segmentation + data/. inkmimic/ and inkmimic-mobile/ excluded per request.
+
+================================================================================
+0. THE ONE-LINE ANSWER TO "HOW DO I FINE-TUNE"
+================================================================================
+
+Your diffusion model (HANDWRITER, arXiv:2011.06704) is a STROKE-LEVEL model.
+Its training input is ONLINE pen data:  (dx, dy, pen_up) triplets per point,
+paired with (a) the text transcription and (b) a line-level image of the same
+text (that image is what the frozen MobileNetV2 "style extractor" consumes).
+
+Your /data is OFFLINE page photos. There is no pen trajectory, no pen-lift,
+no timing, and no text transcription anywhere in the project. You therefore
+CANNOT fine-tune the diffusion model on /data as it stands. You need to
+obtain stroke data for each writer you care about (Section 4 gives the three
+ways to get it). Without that, the only lever you already have is the model's
+built-in style-transfer at inference time (Section 3.1) — which is free and
+works today, and is honestly most of what you want.
+
+================================================================================
+1. WHAT YOU HAVE (ASSET INVENTORY)
+================================================================================
+
+A. DIFFUSION MODEL (diffusion_model/)  — the real generator
+   - Architecture: nn.py = StyleExtractor (frozen MobileNetV2) +
+     DiffusionWriter (1D conv U-Net + text/style cross-attention).
+     Fixed vocab of 73 ASCII tokens (letters, digits, .?!,'"- space).
+     60 beta timesteps, seq len 480, text len 50, channels 128.
+   - weights/model_weights.h5 (~40 MB): the ORIGINAL IAM-pretrained weights
+     from the upstream repo. NOT fine-tuned on any of your data.
+   - Custom glue: generate_handwriting.py (segment page -> pick cleanest line
+     via your classifier -> style-ref -> generate), INTEGRATION_GUIDE.md.
+   - Real bugs already fixed: MobileNetV2 flexible input shape (nn.py),
+     preprocessing.py module-name collision (importlib alias in
+     generate_handwriting.py).
+   - It HAS produced output before: result.png, paragraph_result/ (6 lines
+     stitched), _line_candidates/ (352 files).
+
+B. PREPROCESSING + SEGMENTATION (root)  — the strongest part of the project
+   - preprocessing.py: perspective, deskew, CLAHE, shadow removal, Sauvola,
+     ruled/grid-line removal, stroke repair. Production quality, well
+     documented, tuned against real phone-photo failures.
+   - segment.py: page -> lines -> words -> characters with prose/isolated
+     modes, valley-based splitting of pen-joined letters, manifest.csv.
+     Your note in stuff.txt ("text is being segmented perfectly so far")
+     matches what the code is designed to do. THIS IS YOUR BEST ASSET.
+
+C. LABELING + RECOGNITION (labeling/, training/classifier.py)
+   - labeling/label_app.py: Streamlit manual-labeling UI, dedupes already-
+     labeled files, routes junk to dataset/_junk. Good.
+   - classifier.py + train_emnist.py: SmallCNN (62 classes) with EMNIST
+     pretraining then fine-tune on your crops; auto_label mode. Trained
+     checkpoints exist: classifier.pt, _emnist.pt, _final.pt, _final2/3/4.pt.
+
+D. DATA (raw + derived)  — the weak link
+   - data/ = 16 page photos, all OFFLINE: kirsh (1), mayra (2), alizeh (7),
+     random (6).
+   - dataset/ = 209 labeled character crops: 139 uppercase (folders AA-ZZ,
+     3-13 each), 39 lowercase+digits (1-2 each), 31 _junk. HEAVILY
+     imbalanced, no punctuation.
+   - chars/ (97) chars1/ (53) chars5/ (53) chars7/ (64) chars9/ (219):
+     five overlapping segmentation runs; chars9 is the current one.
+   - diffusion_model/assets/: 6 IAM sample line images (used as default
+     style references).
+   - diffusion_model/data/: only the IAM FILE LISTS (trainset.txt,
+     testset_f/t/v.txt). The actual IAM stroke/images/text data is NOT here.
+   - NO stroke pickles, NO .xml stroke data, NO text transcriptions.
+
+E. GAN PATH (training/gan.py + generation/generate.py) — DEAD
+   - Char-level conditional DCGAN. No generator.pt checkpoint exists.
+     With ~200 samples across 62 classes this can never work well.
+
+================================================================================
+2. WHAT IS DONE WELL
+================================================================================
+
++ preprocessing.py + segment.py: genuinely good engineering. Handles real
+  phone-photo failure modes (shadow gradient, curved ruling, camera
+  perspective) instead of assuming flat scans. This is the part you should
+  be proud of / can defend in the FYP viva.
++ Choosing the pretrained diffusion model over training a GAN from scratch on
+  ~200 samples was the correct call (see plan.md). 209 images can't train
+  any generative model; transfer learning is the right play.
++ generate_handwriting.py is a thoughtful integration: auto-picks the most
+  legible line via your own classifier, reuses one style vector across
+  paragraph lines, and documented two real cross-repo bugs and their fixes.
++ The classifier + auto-label loop is a sane way to scale labeling.
++ Labeling app is well designed (progress survives restarts via filesystem).
+
+================================================================================
+3. WHAT IS DONE BADLY / PROBLEMS
+================================================================================
+
+x1. THE DIFFUSION MODEL CANNOT RUN RIGHT NOW.  TensorFlow is not installed
+    anywhere (root venv and training/venv are PyTorch-only; global python has
+    no TF). diffusion_model/ is dead code until TF is installed. And:
+    - Your Python is 3.12.4 -> tensorflow==2.3.0 (the repo's pin) will NOT
+      install. You need tensorflow>=2.16 for py3.12, which means Keras 3 and
+      a small patch (see 4.1).
+x2. No stroke data, no text transcriptions, no capture tool.  This is the
+    hard blocker for fine-tuning (Section 0). The INTEGRATION_GUIDE.md even
+    says so ("Real fine-tuning needs stroke data, not photos") — but no path
+    to get that data was ever built.
+x3. Two pipelines that don't connect.  GAN path needs generator.pt (doesn't
+    exist). Diffusion path needs TF (not installed). Nothing is end-to-end
+    runnable right now.
+x4. Dataset far too small AND imbalanced.  209 crops, ~139 of them uppercase,
+    1-2 per lowercase class. The char-GAN (and even the classifier beyond a
+    few classes) can't be reliable at this size. _junk (31) pollutes folder
+    counts if not excluded.
+x5. Six classifier checkpoints with no canonical one.  classifier.pt,
+    classifier_emnist.pt, classifier_final.pt /2/3/4.pt. generate_handwriting.py
+    defaults to classifier_final2.pt while classifier_final4.pt is newest.
+    Unclear which is the real production artifact.
+x6. No per-line text transcription of the source pages.  You can't verify
+    segmentation correctness systematically (no ground truth), and you can't
+    build diffusion training pairs without it.
+x7. Duplicated/stale segmentation outputs and docs.  chars, chars1, chars5,
+    chars7, chars9 overlap with no documented winner. explanation.txt is
+    stale (claims GAN is "DONE", dataset only a-f). testa.py (46 KB) is
+    superseded by preprocessing.py + segment.py.
+x8. Style ceiling.  The MobileNetV2 style extractor is FROZEN (ImageNet
+    features). Even after fine-tuning the decoder, style fidelity is limited
+    to what a fixed ImageNet feature map can represent. Also the model's
+    style conditioning was trained to be loose ("similar", not "identical").
+
+================================================================================
+4. WHAT NEEDS TO BE DONE — TO GET THE MOST SIMILAR HANDWRITING
+================================================================================
+
+4.1 MAKE INFERENCE WORK TODAY (no training, ~1 hour)  — best effort/quality
+    ratio
+    - Create a TF-capable environment for diffusion_model/ (keep it separate
+      from your PyTorch venv to avoid library collisions):
+          py -3.12 -m venv diffusion_model/.venv
+          diffusion_model/.venv/Scripts/pip install tensorflow==2.16.* matplotlib pillow h5py
+      NOTE: with TF>=2.16 / Keras 3, train.py's
+      `tf.data.experimental.AUTOTUNE` (utils.py create_dataset) is removed —
+      patch to `tf.data.AUTOTUNE`. Inference (generate_handwriting.py) needs
+      no patch. The MobileNetV2 input_shape=None fix in nn.py is already in.
+    - Use the model as a STYLE-TRANSFER tool, no fine-tuning:
+          cd diffusion_model && .venv/Scripts/python generate_handwriting.py \
+              --page <your page photo> --text "your text" --out out --paragraph
+      The model already generates "in the style of" a reference line at
+      inference time — this is personalization without training. Feed it
+      clean line crops from YOUR pages (that's the whole point of your
+      segmentation pipeline). Run each text a few times (stochastic) and
+      keep the best; straighten/detrend long lines.
+    - This is the honest, defensible FYP story: "pretrained stroke diffusion
+      backbone + our own segmentation/preprocessing feeding it style refs."
+
+4.2 IF YOU ACTUALLY WANT TO FINE-TUNE (per-writer fidelity) — you MUST get
+    stroke data. Pick ONE of these:
+
+    OPTION A — RECORD STROKES (recommended, highest quality)
+       Build a tiny capture app (web/Streamlit/desktop + mouse/stylus/tablet)
+       that records (x, y, t, pen_down) while each writer copies a fixed
+       set of prompts (reuse the IAM prompts so you can also pretrain on IAM
+       if you ever re-download it). Save as JSON/NPZ per line. Even 10-25
+       lines per writer (a few thousand stroke points) is enough to fine-tune
+       the DECODER (keep StyleExtractor frozen).
+       This is exactly what the upstream model was trained on. Best quality,
+       most work to build (but ~a day).
+
+    OPTION B — RECONSTRUCT STROKES FROM YOUR PHOTOS (uses existing /data,
+       medium quality)
+       Skeletonize your binary pages, trace a single connected path through
+       the ink per line, and emit (dx, dy) with pen-up heuristics at joins,
+       crossings, and ink gaps. This produces APPROXIMATE online data from
+       your offline photos — real research ("online reconstruction from
+       offline handwriting"), but timing and pen order are lost, loops/crossings
+       are ambiguous, and the resulting pen-lift signal is noisy. Good enough
+       to make the model "more like" a writer, not to nail it. If you go this
+       way, keep batch norm / low LR so noise doesn't wreck the base model.
+
+    OPTION C — NO FINE-TUNE; KEEP IAM WEIGHTS + STYLE-REF ONLY
+       That's exactly Section 4.1. Least work, least fidelity. If your
+       reference line is clean, it's often "good enough" for a demo.
+
+    WHATEVER THE PATH, you also need:
+    - TEXT TRANSCRIPTION of each training line (type it once per line;
+      you already have the source text for pages you'll photograph).
+    - Build the pickle in the EXACT format utils.preprocess_data() expects:
+      a list of (strokes [N,3] float32, text [L] int32 tokens, sample image
+      [96, W, 1] uint8) triples, saved as data/train_strokes.p. The
+      strokes must be DIFFERENTIAL (dx, dy) normalized by std, pen-up bit
+      as channel 2 — see diffusion_model/preprocessing.py's parse_stroke_xml()
+      and combine_strokes(); replicate that normalization for your data.
+    - Fine-tune settings (train.py already wired): keep StyleExtractor
+      frozen, low LR (1e-4..1e-5, keep warmup), fewer steps (~5-15k), mix in
+      batches from the IAM-pretrained checkpoint or freeze/regularize heavily
+      to avoid catastrophic forgetting on only a few dozen lines. seqlen<=480,
+      textlen<=50, batch 32-96.
+
+4.3 DATA/DATASET HYGIENE (do this regardless)
+    - Label everything you have (209 now; chars9 adds ~219 more) with the
+      labeling app; include punctuation if you want it generated.
+    - Keep ONE canonical chars output dir + ONE canonical classifier
+      checkpoint. Delete the rest (Section 5).
+    - Transcribe the source pages you plan to use for training (Section 4.2).
+
+================================================================================
+5. FILES TO DISCARD / ARCHIVE
+================================================================================
+
+DISCARD (superseded / dead):
+   - testa.py                    -> superseded by preprocessing.py + segment.py.
+   - generation/generate.py      -> GAN path; no generator.pt exists. Archive
+                                    only if you need it for the FYP writeup.
+   - training/gan.py             -> same reason. Archive, don't delete the doc
+                                    value; but it is NOT a working generator.
+   - chars/, chars1/, chars5/, chars7/  -> stale segmentation runs. Keep ONLY
+                                    the current one (chars9) and delete the rest.
+   - training/classifier.pt, classifier_emnist.pt, classifier_final.pt,
+     classifier_final3.pt         -> keep exactly ONE canonical checkpoint
+                                    (recommend classifier_final4.pt) + whichever
+                                    EMNIST-pretrained one you fine-tune from.
+   - stuff.txt                   -> one-off notes ("plane page text..."); fold
+                                    any real content into this summary / README.
+   - explanation.txt             -> STALE (claims GAN done, dataset a-f only,
+                                    says diffusion not yet integrated). Rewrite
+                                    or delete; it misleads.
+   - training/venv/ + root venv/ -> duplicate environments; keep one, delete
+                                    the other (see 4.1 for the TF env).
+   - diffusion_model/data/*.txt  -> IAM file lists; only needed if you
+                                    re-download IAM to pretrain. Harmless, but
+                                    not part of your data.
+   - diffusion_model/result.png, paragraph_result/, _line_candidates/,
+     training/emnist_sample_check.png, training/samples/  -> generated
+                                    artifacts, safe to delete/regenerate.
+
+KEEP (core, don't touch):
+   - preprocessing.py, preprocessing_spec.md, segment.py
+   - labeling/label_app.py
+   - training/classifier.py, training/dataset.py, training/train_emnist.py,
+     training/predict.py, training/batch_test.py, training/normalize_scale.py,
+     training/sort_case.py
+   - diffusion_model/nn.py, utils.py, preprocessing.py, generate_handwriting.py,
+     inference.py, train.py, weights/model_weights.h5, INTEGRATION_GUIDE.md
+   - plan.md, handwriting_fyp_roadmap.md, PRD.md, README.md
+   - data/ (raw photos — the source of truth), dataset/ (labeled crops)
+
+================================================================================
+6. SUMMARY OF ACTIONS (ordered)
+================================================================================
+  1. Install TF (2.16.*) in a separate env; patch tf.data.AUTOTUNE; verify
+     inference runs with your own style line.  [Section 4.1]
+  2. Decide data strategy: RECORD strokes (A) vs RECONSTRUCT from photos (B)
+     vs style-ref-only (C). Only A or B enable real fine-tuning.
+  3. Transcribe the lines you'll train on; build train_strokes.p in the
+     model's exact format.
+  4. Fine-tune the decoder only, low LR, short run, IAM weights as base.
+  5. Consolidate dataset + checkpoints; delete the discard list.  [Section 5]
+  6. For the demo/FYP: the style-ref-only path (4.1) is live TODAY and is the
+     most credible story with the data you have.
+================================================================================

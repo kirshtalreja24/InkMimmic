@@ -1,0 +1,26 @@
+# Unified env: both TensorFlow (diffusion model) and PyTorch (classifier)
+# must coexist in one process — see INTEGRATION_GUIDE.md §6.
+# Python 3.12 ⇒ tensorflow >= 2.16 (Keras 3).
+
+# --- TensorFlow (diffusion model) ---
+tensorflow>=2.16,<2.18
+h5py>=3.10
+
+# --- PyTorch (classifier, segmentation scoring) ---
+torch>=2.0.0
+torchvision>=0.15.0
+
+# --- Image processing ---
+opencv-python>=4.8.0
+Pillow>=10.0.0
+scikit-image>=0.21.0
+numpy>=1.24.0,<2
+
+# --- Rendering ---
+matplotlib>=3.7.0
+
+# --- Web app ---
+streamlit>=1.28.0
+
+# --- Data / labeling ---
+huggingface-hub>=0.20.0

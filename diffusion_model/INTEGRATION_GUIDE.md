@@ -212,3 +212,108 @@ whether a bad line got auto-selected.
 | `preprocessing.py` | `diffusion_model/` | `read_img()` — loads/normalizes the style reference image |
 | `weights/model_weights.h5` | `diffusion_model/` | Pretrained weights (IAM dataset), ~40MB |
 | `generate_handwriting.py` | `diffusion_model/` | **New.** Glue code connecting all of the above |
+
+---
+
+## 8. Per-user fine-tuning (NEW)
+
+Section 6 said real fine-tuning needs stroke data the project didn't collect.
+That's no longer true — the pipeline below reconstructs approximate online
+strokes from the offline page photos already in `data/`, fine-tunes the
+decoder per writer, and renders full pages. The local web app in `app/`
+orchestrates the whole flow; this section documents the CLI pieces and the
+exact data formats.
+
+### 8.1 Environment change
+
+Earlier, this guide recommended installing TensorFlow into the existing
+PyTorch venv. That's still the rule — the app and `generate_handwriting.py`
+import PyTorch (`segment.py`, `classifier.py`) and TensorFlow (`nn.py`,
+`utils.py`) in the **same process**. Use `requirements-app.txt` (TF >= 2.16 /
+Keras 3, numpy<2) rather than the repo's old `tensorflow==2.3.0` pin, which
+won't install on Python 3.12. `utils.py` has been patched for Keras 3:
+`tf.data.experimental.AUTOTUNE` → `tf.data.AUTOTUNE`.
+
+### 8.2 Step A — Reconstruct strokes from photos
+
+`diffusion_model/stroke_reconstruct.py` converts a binarized line crop
+(ink-dark on white) into an approximate online stroke sequence:
+
+```
+skeletonize → pixel graph → chains between junctions/endpoints
+→ left→right ordering with pen-up between chains
+→ arc-length resample to ≤ 480 points (the model's MAX_SEQ_LEN)
+→ normalize exactly like preprocessing.parse_stroke_xml()
+```
+
+Output per line is a `(N, 3) float32` array of `(dx, dy, pen_up)` — the same
+format the IAM data used, so nothing else in the training path changes.
+
+```bash
+python diffusion_model/stroke_reconstruct.py --input line01.png --output_dir out/strokes
+```
+
+`--page` mode segments a full page via `segment.py` first. Every run writes a
+validation overlay (original | skeleton | reconstructed) so you can eyeball
+fidelity before training on a line.
+
+### 8.3 Step B — Build training data
+
+`diffusion_model/build_train_data.py` assembles the pickle that
+`utils.preprocess_data()` reads. Per user:
+
+```
+app/users/<name>/
+  lines/           line crops (line00.png, …)
+  strokes/         lineNN.npy reconstructed strokes
+  transcript.json  { "line00": "text", … }   ← typed once per line
+```
+
+```bash
+python diffusion_model/build_train_data.py \
+    --user_dir app/users/<name> --output_dir app/users/<name>/data
+```
+
+Writes `train_strokes.p` (80%) and `holdout_strokes.p` (20%). Lines with an
+empty transcription or missing stroke file are skipped. Characters outside
+the 73-token vocab are replaced with `_` and reported.
+
+### 8.4 Step C — Fine-tune the decoder
+
+`diffusion_model/finetune.py` loads the IAM-pretrained weights, then trains
+the decoder only (the `StyleExtractor` is frozen and, being precomputed in
+`create_dataset`, is never in the training graph):
+
+```bash
+python diffusion_model/finetune.py --user_data app/users/<name>/data/train_strokes.p \
+    --user <name> --steps 5000 --batchsize 32 --lr 1e-4
+```
+
+Settings that matter: peak LR 1e-4..1e-5 (high LR → catastrophic forgetting of
+the IAM prior), short runs (5–15k steps), dropout 0.1. Batch size is clamped to
+the dataset size so a small per-user set never trains on zero batches. Output:
+`weights/model_<name>.h5` — the base `model_weights.h5` is never overwritten.
+
+### 8.5 Step D — Generate a page
+
+`diffusion_model/renderer.py` replaces the matplotlib output with an
+anti-aliased PIL renderer (variable stroke width from pen velocity, ink color,
+white/ruled/graph paper). `diffusion_model/generate_page.py` wraps generation:
+per-user weights + the user's own style line, word-wrap to ≤45 chars/line,
+best-of-N stochastic retries, and an optional legibility gate that scores each
+attempt by reading it back with the trained `SmallCNN`.
+
+```bash
+python diffusion_model/generate_page.py --text "Assignment text…" \
+    --weights diffusion_model/weights/model_<name>.h5 \
+    --style app/users/<name>/lines/line00.png --out out --tries 3
+```
+
+### 8.6 Quality expectations
+
+Reconstruction from photos is an approximation: pen order and timing are lost,
+and loops/crossings are ambiguous. The fine-tuned model will be noticeably
+*more like* the writer than the IAM base (slant, size, spacing, rhythm, and
+partial letterform shape), but it is not forge-grade. If the web app's
+overlays show a line reconstructing badly, reject that line rather than
+training on it.

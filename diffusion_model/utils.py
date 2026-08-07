@@ -131,7 +131,7 @@ def create_dataset(strokes, texts, samples, style_extractor, batch_size, buffer_
     style_vectors = style_vectors.astype('float32')
     
     dataset = tf.data.Dataset.from_tensor_slices((strokes, texts, style_vectors))
-    dataset = dataset.shuffle(buffer_size).batch(batch_size, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE)
+    dataset = dataset.shuffle(buffer_size).batch(batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
     return dataset
     
 class Tokenizer:

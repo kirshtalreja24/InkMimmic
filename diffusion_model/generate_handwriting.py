@@ -265,7 +265,7 @@ if __name__ == '__main__':
                          help='output filename (no extension) for single-line mode, '
                               'or output DIRECTORY for --paragraph mode')
     parser.add_argument('--work_dir', default='./_line_candidates')
-    parser.add_argument('--checkpoint', default=os.path.join(AI_HANDWRITER_TRAINING_DIR, 'classifier_final2.pt'))
+    parser.add_argument('--checkpoint', default=os.path.join(AI_HANDWRITER_TRAINING_DIR, 'classifier_final4.pt'))
     parser.add_argument('--weights', default='./weights/model_weights.h5')
     parser.add_argument('--mode', choices=['auto', 'prose', 'isolated'], default='auto')
     parser.add_argument('--paragraph', action='store_true',
