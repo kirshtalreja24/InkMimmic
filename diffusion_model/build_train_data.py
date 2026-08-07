@@ -1,4 +1,5 @@
 """
+
 build_train_data.py — Build per-user training pickles for the diffusion model.
 
 Assembles reconstructed strokes + typed transcriptions + line images into the

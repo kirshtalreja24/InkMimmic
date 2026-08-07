@@ -1,4 +1,5 @@
 """
+
 finetune.py — Per-user fine-tuning of the HANDWRITER diffusion model.
 
 Loads pretrained IAM weights, then fine-tunes the DECODER ONLY (StyleExtractor

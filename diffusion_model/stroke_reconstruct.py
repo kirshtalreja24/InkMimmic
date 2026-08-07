@@ -1,4 +1,5 @@
 """
+
 stroke_reconstruct.py — Reconstruct approximate online stroke data from offline
 handwriting line images.
 

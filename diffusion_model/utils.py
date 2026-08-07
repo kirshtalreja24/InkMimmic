@@ -6,6 +6,7 @@ import pickle
 import os
 
 #notation clarification:
+
 #we use the variable "alpha" for alpha_bar (cumprod 1-beta)
 #the alpha in the paper is replaced with 1-beta
 def explin(min, max, L):

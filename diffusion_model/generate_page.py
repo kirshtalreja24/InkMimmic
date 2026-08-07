@@ -1,4 +1,5 @@
 """
+
 generate_page.py — Generate a full page of handwriting in a per-user style.
 
 Loads a fine-tuned per-user model (or the IAM base), generates each wrapped

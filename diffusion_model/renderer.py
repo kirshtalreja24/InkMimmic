@@ -1,4 +1,5 @@
 """
+
 renderer.py — High-quality ink renderer for the HANDWRITER diffusion model.
 
 Replaces the matplotlib-based utils.show() for product output.

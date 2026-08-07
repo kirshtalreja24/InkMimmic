@@ -1,4 +1,5 @@
 """
+
 generate_handwriting.py
 
 Lives inside Diffusion-Handwriting-Generation/, run as a sibling folder to
