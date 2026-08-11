@@ -118,9 +118,15 @@ def finetune(
     )
 
     # Dummy forward pass to build weights (required before load_weights)
+    # IMPORTANT: sigma must be 3D here (matching what utils.get_alphas()
+    # actually produces at training time: shape (batch,1,1)), not 2D.
+    # A 2D dummy sigma here builds the model's Dense layers against the
+    # wrong rank; at batch_size=1 this coincidentally still broadcasts
+    # correctly (masking the bug), but at any batch_size > 1 it causes a
+    # real shape mismatch inside AffineTransformLayer during training.
     _stroke = tf.random.normal([1, 400, 2])
     _text = tf.random.uniform([1, 40], dtype=tf.int32, maxval=50)
-    _noise = tf.random.uniform([1, 1])
+    _noise = tf.random.uniform([1, 1, 1])
     _style = tf.random.normal([1, 14, 1280])
     _ = model(_stroke, _text, _noise, _style)
 
@@ -179,7 +185,7 @@ def finetune(
             print(f"  Step {step:6d}/{steps}  loss={avg_loss:.4f}  lr={current_lr:.2e}  time={elapsed:.0f}s")
 
         if step % save_every == 0:
-            ckpt_path = os.path.join(output_dir, f'model_{user_name}_step{step}.h5')
+            ckpt_path = os.path.join(output_dir, f'model_{user_name}_step{step}.weights.h5')
             model.save_weights(ckpt_path)
             print(f"  Checkpoint → {ckpt_path}")
 
@@ -187,7 +193,7 @@ def finetune(
             break
 
     # --- 5. Save final weights ---
-    final_path = os.path.join(output_dir, f'model_{user_name}.h5')
+    final_path = os.path.join(output_dir, f'model_{user_name}.weights.h5')
     model.save_weights(final_path)
     elapsed = time.time() - start_time
     final_loss = np.mean(losses[-min(100, len(losses)):])

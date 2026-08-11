@@ -387,23 +387,41 @@ with st.expander('5️⃣ Build dataset & fine-tune model', expanded=False):
             out_dir.mkdir(exist_ok=True)
             code_placeholder = st.empty()
             sentinel = [False]
+
+            # IMPORTANT: read session_state on the MAIN thread and capture it
+            # in a plain variable before the background thread starts.
+            # st.session_state is not reliably accessible from inside a
+            # background thread -- reading it there was the cause of the
+            # AttributeError, which was then silently swallowed below,
+            # while the app still reported "success" regardless.
+            current_user = st.session_state.user
+
             q = run_with_stream(
                 lambda: finetune.finetune(
                     data_path=str(train_pickle),
                     base_weights=str(base_weights),
-                    user_name=st.session_state.user,
+                    user_name=current_user,
                     steps=int(steps),
                     batch_size=int(batch),
                     lr=float(lr),
                     output_dir=str(out_dir),
                 )
             )
-            # Stream output until done
+            # Stream output until done, and track whether an error was logged
+            error_seen = [False]
             while not sentinel[0]:
                 time.sleep(0.2)
                 drain_stdout(q, code_placeholder, sentinel)
             drain_stdout(q, code_placeholder, sentinel)
-            st.success(f'Fine-tuning complete. Weights → {out_dir / f"model_{st.session_state.user}.h5"}')
+
+            expected_weights = out_dir / f'model_{current_user}.h5'
+            if expected_weights.is_file():
+                st.success(f'Fine-tuning complete. Weights → {expected_weights}')
+            else:
+                st.error(
+                    f'Fine-tuning did not produce a weights file at {expected_weights}. '
+                    'Check the log above for an [ERROR] line -- that is the real failure reason.'
+                )
 
         finetuned = (u / 'weights' / f'model_{st.session_state.user}.h5')
         if finetuned.is_file():

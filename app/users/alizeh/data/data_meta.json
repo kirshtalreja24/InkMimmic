@@ -1,0 +1,10 @@
+{
+  "user_dir": "app/users/alizeh",
+  "n_train": 3,
+  "n_holdout": 1,
+  "max_text_len": 50,
+  "max_seq_len": 480,
+  "img_width": 1400,
+  "img_height": 96,
+  "vocab_size": 73
+}

@@ -208,7 +208,7 @@ def build_pickle(
 
         if len(tokens) >= max_text_len:
             print(f"  Line {entry['line_num']}: text too long ({len(tokens)} tokens), truncating to {max_text_len - 1}")
-            tokens = tokens[:max_text_len - 1] + [1]  # re-add end token
+            tokens = tokens[:max_text_len - 2] + [1]  # re-add end token
 
         # Pad strokes — replicate utils.pad_stroke_seq logic
         if len(strokes) > max_seq_len:
@@ -228,20 +228,21 @@ def build_pickle(
             padding = np.concatenate((zeros, ones), axis=-1)
             strokes = np.concatenate((strokes, padding), axis=0).astype(np.float32)
 
-        # Pad tokens to max_text_len
+        # NOTE: intentionally NOT padding tokens_arr to max_text_len here.
+        # diffusion_model/utils.py::preprocess_data() only keeps a sample if
+        # len(text) < max_text_len (strict), because IT does the padding
+        # itself afterward. Pre-padding to exactly max_text_len here made
+        # every sample fail that check (50 < 50 is False), silently
+        # dropping 100% of the dataset. Leave tokens at their natural
+        # (already-truncated-if-needed) length instead.
         tokens_arr = np.array(tokens, dtype=np.int32)
-        if len(tokens_arr) < max_text_len:
-            tokens_arr = np.concatenate([
-                tokens_arr,
-                np.zeros(max_text_len - len(tokens_arr), dtype=np.int32)
-            ])
 
         # Load and prepare line image
         sample = read_line_image(entry['image_path'], height=img_height)
         if sample.shape[1] >= img_width:
             sample = sample[:, :img_width, :]
-        else:
-            sample = _pad_img(sample, img_width, img_height)
+        # else: leave narrower than img_width -- preprocess_data() pads it itself,
+        # and only accepts samples where shape[1] < img_width (strict).
 
         dataset.append((strokes, tokens_arr, sample))
 
