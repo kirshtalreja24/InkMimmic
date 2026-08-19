@@ -31,7 +31,7 @@ def strokes_to_abs_points(strokes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     Returns (points [N,2], pen_up [N]).
     """
     coords = strokes[:, :2]
-    pen_up = strokes[:, 2]
+    pen_up = np.asarray(strokes[:, 2]).reshape(-1)
 
     # Cumulative sum — but reset at pen-up boundaries so "pen in air" jumps
     # don't produce one long connected line.
@@ -48,8 +48,21 @@ def strokes_to_abs_points(strokes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 def compute_velocities(points: np.ndarray, pen_up: np.ndarray) -> np.ndarray:
     """Per-point velocity magnitude (distance moved per step)."""
+    pen_up = np.asarray(pen_up).reshape(-1)
     diffs = np.linalg.norm(np.diff(points, axis=0), axis=1)
     velocities = np.concatenate([[diffs[0] if len(diffs) else 0.0], diffs])
+
+    # pen_up should have exactly one entry per point (same length as
+    # velocities). If it doesn't -- e.g. a malformed/short stroke sequence
+    # upstream -- align it instead of crashing: truncate if too long, pad
+    # with "pen down" (0.0) if too short.
+    n = velocities.shape[0]
+    if pen_up.shape[0] != n:
+        if pen_up.shape[0] > n:
+            pen_up = pen_up[:n]
+        else:
+            pen_up = np.concatenate([pen_up, np.zeros(n - pen_up.shape[0], dtype=pen_up.dtype)])
+
     # Zero velocity at pen-up boundaries to force thin/dashed transitions
     velocities[pen_up > 0.5] = 0.0
     return velocities
@@ -105,6 +118,18 @@ def render_strokes(
 
     if len(points) == 0:
         raise ValueError("No points to render")
+
+    # Guard against pen_up not having exactly one entry per point (seen with
+    # some short/edge-case stroke sequences from the model). Align it here,
+    # once, so every downstream use (compute_velocities, the draw loop) can
+    # safely assume len(pen_up) == len(points).
+    pen_up = np.asarray(pen_up).reshape(-1)
+    if pen_up.shape[0] != points.shape[0]:
+        n = points.shape[0]
+        if pen_up.shape[0] > n:
+            pen_up = pen_up[:n]
+        else:
+            pen_up = np.concatenate([pen_up, np.zeros(n - pen_up.shape[0], dtype=pen_up.dtype)])
 
     # Scale coordinates so the stroke extents map to the target height
     # The model's coordinate space is std-normalized; we use the y-extent

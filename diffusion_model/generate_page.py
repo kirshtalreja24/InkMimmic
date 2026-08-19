@@ -23,6 +23,7 @@ import textwrap
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 os.environ.setdefault('TF_CPP_MIN_LOG_LEVEL', '2')
 import tensorflow as tf
@@ -69,7 +70,8 @@ def _load_classifier():
         model.load_state_dict(ckpt['model_state'])
         model.eval()
         return {'model': model, 'device': device, 'classes': ckpt['classes'],
-                'torch': torch, 'F': F, 'tfm': transforms.Compose([
+                'torch': torch, 'F': F, 'load_grayscale': _load_as_grayscale,
+                'tfm': transforms.Compose([
                     transforms.Lambda(lambda img: pad_to_square(img, 32, fill=0)),
                     transforms.ToTensor(),
                     transforms.Normalize((0.5,), (0.5,)),
@@ -103,6 +105,7 @@ def score_generation(gate, image_path, expected_text):
     torch, F = gate['torch'], gate['F']
     model, device, classes = gate['model'], gate['device'], gate['classes']
     tfm = gate['tfm']
+    load_grayscale = gate['load_grayscale']
 
     label_to_char = {classes[i]: classes[i] for i in range(len(classes))}
     # folder names are like 'AA', 'a', '9' → take first char for single-char labels
@@ -134,7 +137,7 @@ def score_generation(gate, image_path, expected_text):
     with torch.no_grad():
         preds = []
         for p in crops:
-            img = _load_as_grayscale(p)
+            img = load_grayscale(p)
             x = tfm(img).unsqueeze(0).to(device)
             probs = F.softmax(model(x), dim=1)[0]
             conf, idx = probs.max(dim=0)
@@ -191,8 +194,13 @@ class PageGenerator:
         paper='white',
         line_height=128,
         gate=None,
+        export_format='pdf',
     ):
-        """Generate a full page (word-wrapped, best-of-N) and return the path."""
+        """Generate a full page (word-wrapped, best-of-N) and return the path.
+
+        export_format: 'png', 'pdf' (default), or 'both'. Controls which
+        file(s) the final composed page is saved as.
+        """
         os.makedirs(out_dir, exist_ok=True)
         style_vector = self._style_vector(style_image_path)
 
@@ -208,12 +216,31 @@ class PageGenerator:
             line_images = []
             line_strokes = []
             for i, line in enumerate(lines):
+                # run_batch_inference always returns a BATCHED array of shape
+                # (batch_size, time_steps, 3), even for a single line of text
+                # (it wraps the input in a batch of size 1 internally). Take
+                # [0] to unwrap it into the (time_steps, 3) stroke sequence
+                # that renderer.render_strokes() expects. Without this, the
+                # renderer receives a 3D array, silently mis-slices it, and
+                # produces a blank/garbage page instead of raising an error.
+                #
+                # NOTE: the "path" passed here is where utils.show() (inside
+                # run_batch_inference) saves its OWN matplotlib preview of the
+                # raw model output. That used to collide with img_path below
+                # -- renderer.render_strokes() would silently overwrite it --
+                # so there was no way to see what the model itself produced
+                # before our renderer got involved. Suffixed with "_raw" so
+                # both images survive and can be compared directly.
+                raw_preview_path = os.path.join(out_dir, f'_try{attempt}_line{i:02d}_raw')
                 strokes = utils.run_batch_inference(
                     self.model, self.beta_set, line, style_vector,
                     tokenizer=self.tokenizer, time_steps=len(line) * 16 - (len(line) * 16 % 8) + 8,
                     diffusion_mode='new', show_samples=False,
-                    path=os.path.join(out_dir, f'_try{attempt}_line{i:02d}'),
-                )
+                    path=raw_preview_path,
+                )[0]
+                print(f"  [DEBUG] line {i:02d} strokes shape={strokes.shape} "
+                      f"min={strokes.min():.4f} max={strokes.max():.4f} "
+                      f"mean={strokes.mean():.4f} pen_up_frac={(strokes[:, 2] > 0.5).mean():.3f}")
                 img_path = os.path.join(out_dir, f'_try{attempt}_line{i:02d}.png')
                 renderer.render_strokes(strokes, img_path, height=line_height,
                                         ink_color=ink_color, paper=paper)
@@ -233,14 +260,22 @@ class PageGenerator:
                 best_strokes = list(line_strokes)
 
         # Compose the best attempt into a single page image
-        from PIL import Image
-        page_path = self._compose_page(best_lines, best_strokes, out_dir, line_height, paper)
+        page_paths = self._compose_page(
+            best_lines, best_strokes, out_dir, line_height, paper, export_format
+        )
         print(f"  Best score: {best_score:.3f}")
-        print(f"  Page → {page_path}")
-        return page_path
+        for p in page_paths:
+            print(f"  Page → {p}")
+        # Keep return type backward-compatible: single path if only one format
+        # was requested, otherwise return the list (png first, pdf second).
+        return page_paths[0] if len(page_paths) == 1 else page_paths
 
-    def _compose_page(self, line_images, line_strokes, out_dir, line_height, paper):
-        """Stack rendered lines into a single page image with spacing."""
+    def _compose_page(self, line_images, line_strokes, out_dir, line_height, paper, export_format='both'):
+        """Stack rendered lines into a single page image with spacing.
+
+        Saves the composed page as PNG and/or PDF depending on export_format
+        ('png', 'pdf', or 'both'). Returns a list of the file paths written.
+        """
         imgs = [Image.open(p).convert('RGB') for p in line_images]
         max_w = max(im.width for im in imgs)
         line_gap = max(8, int(line_height * 0.35))
@@ -252,9 +287,20 @@ class PageGenerator:
             page.paste(im, (0, y))
             y += im.height + line_gap
 
-        final_path = os.path.join(out_dir, 'page_output.png')
-        page.save(final_path)
-        return final_path
+        written = []
+        if export_format in ('png', 'both'):
+            png_path = os.path.join(out_dir, 'page_output.png')
+            page.save(png_path)
+            written.append(png_path)
+        if export_format in ('pdf', 'both'):
+            pdf_path = os.path.join(out_dir, 'page_output.pdf')
+            # PIL writes PDFs directly from an RGB image, no extra deps needed.
+            page.save(pdf_path, 'PDF')
+            written.append(pdf_path)
+
+        if not written:
+            raise ValueError(f"Unknown export_format: {export_format!r} (use 'png', 'pdf', or 'both')")
+        return written
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +318,8 @@ def main():
     parser.add_argument('--paper', choices=['white', 'ruled', 'graph'], default='white')
     parser.add_argument('--height', type=int, default=128, help='Line height in px')
     parser.add_argument('--no_gate', action='store_true', help='Disable the legibility gate')
+    parser.add_argument('--format', choices=['png', 'pdf', 'both'], default='pdf',
+                         help='Output file format for the final page (default: pdf)')
     args = parser.parse_args()
 
     gate = None if args.no_gate else _load_classifier()
@@ -280,6 +328,7 @@ def main():
         args.text, args.style, args.out,
         max_chars_per_line=args.max_chars, n_tries=args.tries,
         ink_color=args.ink, paper=args.paper, line_height=args.height, gate=gate,
+        export_format=args.format,
     )
 
 
