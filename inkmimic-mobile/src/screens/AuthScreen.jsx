@@ -48,6 +48,19 @@ export default function AuthScreen() {
                 <RegisterForm onSwitchToLogin={() => setMode('login')} />
               )}
             </View>
+
+            <View className="mt-6 border-t border-royal-500/15 pt-5 items-center">
+              <Text
+                onPress={async () => {
+                  const { signInWithPassword } = await import('../lib/supabase/auth.js');
+                  await signInWithPassword('guest@inkmimic.local', 'password123');
+                }}
+                className="font-bodySemibold text-xs text-gold-300/80 active:opacity-70"
+              >
+                Continue as Guest (Skip Sign In) →
+              </Text>
+            </View>
+
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

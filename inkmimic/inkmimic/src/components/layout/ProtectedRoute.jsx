@@ -6,7 +6,7 @@ export function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
 
   // Without Supabase configured there's no session to check — let the
-  // workspace through so the UI (and the ai-prototype chat) can still be
+  // workspace through so the UI (and handwriting chat) can still be
   // exercised during setup.
   if (!isSupabaseConfigured) return children;
 
