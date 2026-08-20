@@ -29,7 +29,7 @@ export function RootNavigator() {
   const { isAuthenticated, loading } = useAuth();
 
   // Without Supabase configured there's no session to check — let Workspace
-  // through so the UI (and the ai-prototype chat) can still be exercised
+  // through so the UI (and handwriting chat) can still be exercised
   // during setup, same fallback the webapp uses.
   const showWorkspace = !isSupabaseConfigured || isAuthenticated;
 

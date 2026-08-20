@@ -3,14 +3,17 @@
 // process.env at build time — same idea as Vite's import.meta.env on web.
 
 export const env = {
-  supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL ?? '',
-  supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '',
-
-  // Prototyping only — see src/packages/README.md.
-  // Never ship a build with a real key baked into client code.
-  geminiApiKey: process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '',
-  geminiModel: process.env.EXPO_PUBLIC_GEMINI_MODEL ?? 'gemini-3.6-flash',
+  supabaseUrl: (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').trim(),
+  supabaseAnonKey: (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '').trim(),
+  apiUrl: (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000').trim(),
 };
 
-export const isSupabaseConfigured = Boolean(env.supabaseUrl && env.supabaseAnonKey);
-export const isAiPrototypeConfigured = Boolean(env.geminiApiKey);
+export const isSupabaseConfigured = Boolean(
+  env.supabaseUrl &&
+  env.supabaseAnonKey &&
+  env.supabaseUrl.startsWith('http') &&
+  !env.supabaseUrl.includes('placeholder') &&
+  !env.supabaseAnonKey.includes('placeholder')
+);
+
+

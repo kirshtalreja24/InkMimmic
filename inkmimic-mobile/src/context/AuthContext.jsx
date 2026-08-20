@@ -6,23 +6,36 @@ export const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(isSupabaseConfigured);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!isSupabaseConfigured) return undefined;
-
-    let subscription;
+    let isMounted = true;
 
     getSession()
-      .then((s) => setSession(s))
-      .finally(() => setLoading(false));
+      .then((s) => {
+        if (isMounted && s) setSession(s);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (isMounted) setLoading(false);
+      });
 
-    subscription = onAuthStateChange((_event, s) => {
-      setSession(s);
+    const subscription = onAuthStateChange((_event, s) => {
+      if (isMounted) {
+        setSession(s);
+        setLoading(false);
+      }
     });
 
-    return () => subscription?.unsubscribe();
+    return () => {
+      isMounted = false;
+      try {
+        subscription?.unsubscribe?.();
+      } catch {}
+    };
   }, []);
+
+
 
   const value = useMemo(
     () => ({

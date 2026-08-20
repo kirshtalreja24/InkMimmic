@@ -1,14 +1,14 @@
 import { useState } from 'react';
-// Swap this single import to `../../packages/ai-core` once the real
-// integration is implemented — see src/packages/README.md.
-import { generateHandwrittenArtifact } from '../../packages/ai-prototype/index.js';
+import { generateHandwrittenArtifact } from '../../packages/ai-core/index.js';
 import { FileDropZone } from './FileDropZone.jsx';
 
-const DEFAULT_PROMPT = 'Rewrite this page in a tidier version of the same handwriting.';
+const DEFAULT_PROMPT = 'Write down notes in realistic natural handwriting.';
 
 export function ChatPanel({ state, onStateChange, onArtifact }) {
   const [file, setFile] = useState(null);
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
+  const [paper, setPaper] = useState('white');
+  const [inkColor, setInkColor] = useState('#1a1a2e');
   const [errorMessage, setErrorMessage] = useState(null);
 
   function handleFile(newFile) {
@@ -30,7 +30,12 @@ export function ChatPanel({ state, onStateChange, onArtifact }) {
 
     try {
       onStateChange('awaiting');
-      const artifact = await generateHandwrittenArtifact({ sampleFile: file, prompt });
+      const artifact = await generateHandwrittenArtifact({
+        sampleFile: file,
+        prompt,
+        paper,
+        inkColor,
+      });
       onArtifact(artifact);
       onStateChange('regenerated');
     } catch (err) {
@@ -48,7 +53,7 @@ export function ChatPanel({ state, onStateChange, onArtifact }) {
       <form onSubmit={handleSubmit} className="flex flex-1 flex-col gap-4">
         <div>
           <label className="field-label" htmlFor="chat-prompt">
-            What should Inkmimic do?
+            Text to write in handwriting
           </label>
           <textarea
             id="chat-prompt"
@@ -56,14 +61,48 @@ export function ChatPanel({ state, onStateChange, onArtifact }) {
             onChange={(e) => setPrompt(e.target.value)}
             rows={4}
             className="field-input resize-none"
-            placeholder="e.g. Make this note look neater, keep the same handwriting"
+            placeholder="Type or paste the text you want converted to handwriting..."
           />
-          {!file && (
-            <p className="mt-2 text-xs text-parchment/35">
-              No sample uploaded — the prototype will just respond to your prompt as text.
+          {!file ? (
+            <p className="mt-2 text-xs text-parchment/50">
+              No sample uploaded — the model will use its classic handwriting style reference.
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-gold-300/80">
+              Sample attached — the model will mimic your sample's handwriting style.
             </p>
           )}
         </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-parchment/60" htmlFor="paper-select">Paper Style</label>
+            <select
+              id="paper-select"
+              value={paper}
+              onChange={(e) => setPaper(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-royal-500/30 bg-ink-900 px-3 py-1.5 text-xs text-parchment"
+            >
+              <option value="white">Plain White</option>
+              <option value="ruled">Ruled Lines</option>
+              <option value="graph">Graph Paper</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-parchment/60" htmlFor="ink-select">Ink Color</label>
+            <select
+              id="ink-select"
+              value={inkColor}
+              onChange={(e) => setInkColor(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-royal-500/30 bg-ink-900 px-3 py-1.5 text-xs text-parchment"
+            >
+              <option value="#1a1a2e">Deep Ink (#1a1a2e)</option>
+              <option value="#0c2340">Navy Blue (#0c2340)</option>
+              <option value="#111111">Black Ink (#111111)</option>
+            </select>
+          </div>
+        </div>
+
 
         {errorMessage && (
           <p role="alert" className="rounded-lg bg-red-500/10 px-4 py-2 text-sm text-red-300">

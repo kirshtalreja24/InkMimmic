@@ -1,12 +1,10 @@
 import { useState } from 'react';
 import { View, Text, TextInput } from 'react-native';
-// Swap this single import to `../../packages/ai-core` once the real
-// integration is implemented — see src/packages/README.md.
-import { generateHandwrittenArtifact } from '../../packages/ai-prototype/index.js';
+import { generateHandwrittenArtifact } from '../../packages/ai-core/index.js';
 import { SamplePicker } from './SamplePicker.jsx';
 import { Button } from '../ui/Button.jsx';
 
-const DEFAULT_PROMPT = 'Rewrite this page in a tidier version of the same handwriting.';
+const DEFAULT_PROMPT = 'Write down notes in realistic natural handwriting.';
 
 export function ChatPanel({ state, onStateChange, onArtifact }) {
   const [asset, setAsset] = useState(null);
@@ -46,21 +44,25 @@ export function ChatPanel({ state, onStateChange, onArtifact }) {
 
       <View>
         <Text className="mb-2 font-body text-sm text-parchment/70">
-          What should Inkmimic do?
+          Text to convert to handwriting
         </Text>
         <TextInput
           value={prompt}
           onChangeText={setPrompt}
           multiline
           numberOfLines={4}
-          placeholder="e.g. Make this note look neater, keep the same handwriting"
+          placeholder="Type or paste the text you want handwritten..."
           placeholderTextColor="rgba(246,241,230,0.3)"
           className="rounded-xl border border-royal-500/30 bg-ink-950/60 px-4 py-3 font-body text-parchment"
           style={{ minHeight: 96, textAlignVertical: 'top' }}
         />
-        {!asset && (
+        {!asset ? (
           <Text className="mt-2 font-body text-xs text-parchment/35">
-            No sample attached — the prototype will just respond to your prompt as text.
+            No sample attached — the model will use its classic handwriting style reference.
+          </Text>
+        ) : (
+          <Text className="mt-2 font-body text-xs text-gold-300/80">
+            Sample attached — the model will mimic your sample's handwriting style.
           </Text>
         )}
       </View>
