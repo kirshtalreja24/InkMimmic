@@ -484,21 +484,14 @@ def reconstruct_page(
     results = []
     for line_num, line_rows in sorted(by_line.items()):
         # Compute line bounding box
-        xs0 = min(int(r['x']) for r in line_rows)
-        ys0 = min(int(r['y']) for r in line_rows)
-        xs1 = max(int(r['x']) + int(r['width']) for r in line_rows)
-        ys1 = max(int(r['y']) + int(r['height']) for r in line_rows)
-
-        padding = 6
-        y0 = max(ys0 - padding, 0)
-        y1 = min(ys1 + padding, binary.shape[0])
-        x0 = max(xs0 - padding, 0)
-        x1 = min(xs1 + padding, binary.shape[1])
-
-        line_crop = binary[y0:y1, x0:x1]
-        # binary from segment.py: ink=255, bg=0 → save inverted (ink=dark, bg=white)
+        boxes = [(int(r['x']), int(r['y']), int(r['width']), int(r['height'])) for r in line_rows]
+        bbox = segment.line_bbox(boxes, pad=6, img_shape=binary.shape)
+        # binary from segment.py: ink=255, bg=0 → crop_line_image inverts to ink=dark, bg=white
+        line_crop = segment.crop_line_image(binary, bbox)
+        if line_crop is None:
+            continue
         line_img_path = os.path.join(lines_dir, f'line{line_num:02d}.png')
-        cv2.imwrite(line_img_path, 255 - line_crop)
+        cv2.imwrite(line_img_path, line_crop)
 
         try:
             strokes, abs_points, skeleton = reconstruct_strokes(

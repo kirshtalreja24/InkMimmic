@@ -60,6 +60,8 @@ app.add_middleware(
 
 _generator = None
 _generator_error = None
+_gate = None
+_gate_loaded = False
 
 
 def get_generator():
@@ -80,6 +82,20 @@ def get_generator():
     except Exception as exc:  # noqa: BLE001
         _generator_error = str(exc)
         raise HTTPException(status_code=500, detail=f"Failed to load handwriting model: {exc}")
+
+
+def get_gate():
+    """Lazy-load the classifier legibility gate (same one app.py's research
+    pipeline uses), so best-of-N scoring is consistent across both frontends.
+    Degrades gracefully to None (generate_page.score_generation falls back to
+    an ink-density heuristic) if torch or the checkpoint aren't available.
+    """
+    global _gate, _gate_loaded
+    if not _gate_loaded:
+        import generate_page  # noqa: E402
+        _gate = generate_page._load_classifier()
+        _gate_loaded = True
+    return _gate
 
 
 def extract_style_reference(sample_image_path: str, temp_dir: str) -> str:
@@ -111,18 +127,13 @@ def extract_style_reference(sample_image_path: str, temp_dir: str) -> str:
                 binary = segment.preprocess(sample_image_path)
                 first_line_rows = [r for r in rows if r.get('line') == rows[0].get('line', '0')]
                 if first_line_rows:
-                    xs0 = min(int(r['x']) for r in first_line_rows)
-                    ys0 = min(int(r['y']) for r in first_line_rows)
-                    xs1 = max(int(r['x']) + int(r['width']) for r in first_line_rows)
-                    ys1 = max(int(r['y']) + int(r['height']) for r in first_line_rows)
-                    pad = 6
-                    y0, y1 = max(ys0 - pad, 0), min(ys1 + pad, binary.shape[0])
-                    x0, x1 = max(xs0 - pad, 0), min(xs1 + pad, binary.shape[1])
-                    crop = binary[y0:y1, x0:x1]
-                    if crop.size > 0:
+                    boxes = [(int(r['x']), int(r['y']), int(r['width']), int(r['height'])) for r in first_line_rows]
+                    bbox = segment.line_bbox(boxes, pad=6, img_shape=binary.shape)
+                    crop = segment.crop_line_image(binary, bbox)
+                    if crop is not None:
                         out_line = os.path.join(temp_dir, 'extracted_line.png')
                         import cv2
-                        cv2.imwrite(out_line, 255 - crop)
+                        cv2.imwrite(out_line, crop)
                         return out_line
     except Exception as e:
         print(f"[WARN] Style extraction fallback: {e}")
@@ -191,7 +202,7 @@ async def generate(
                 ink_color=ink_color,
                 paper=paper,
                 export_format="png",
-                gate=None,
+                gate=get_gate(),
             )
 
             png_file = os.path.join(out_dir, "page_output.png")

@@ -1,0 +1,9 @@
+{
+  "name": "inkmimic-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "inkmimic/inkmimic",
+    "inkmimic-mobile"
+  ]
+}

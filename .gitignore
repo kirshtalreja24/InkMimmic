@@ -15,4 +15,7 @@ chars_small/
 chars_small_scaled/
 p1/
 diffusion_model/_line_candidates/
+diffusion_model/paragraph_result/
+diffusion_model/result.png
 app/users/alizeh/weights/model_alizeh_step*.weights.h5
+node_modules

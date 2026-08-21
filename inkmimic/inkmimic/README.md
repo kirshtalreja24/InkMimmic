@@ -39,17 +39,13 @@ Without a `.env`, the app still runs: the auth page will show a notice, and
 
 ### AI integration
 
-This is the part left for you to build. Two packages live in
-`src/packages/`:
-
-- **`ai-core/`** — empty on purpose. This is where your production
-  handwriting-generation model gets wired in.
-- **`ai-prototype/`** — a working stand-in that calls the Anthropic API
-  directly from the browser, so the chat box, drag-and-drop, and full
-  request/response loop can be tested right now. It is **not** safe to
-  ship — see `src/packages/README.md` for the migration path to `ai-core`.
-
-To test the prototype chat, add `VITE_ANTHROPIC_API_KEY` to `.env`.
+- **`src/packages/ai-core/`** — the real AI integration. Calls the FastAPI
+  handwriting model backend (`api/server.py`)'s `/api/generate` and
+  `/api/analyze-style` endpoints — see `src/packages/README.md`. The
+  request/response logic itself lives in the shared `inkmimic-core`
+  workspace package (`packages/inkmimic-core/`, also used by the mobile
+  app); this package only supplies the web-specific FormData sample
+  attachment.
 
 ## Project structure
 
@@ -65,8 +61,7 @@ src/
   hooks/            useAuth, useFileDrop
   lib/supabase/     client.js, auth.js, storage.js
   packages/
-    ai-core/        <- implement your real AI integration here
-    ai-prototype/   <- Anthropic-backed stand-in, for testing only
+    ai-core/        <- FastAPI handwriting model client
   config/           env.js — single source of truth for env vars
   types/            shared JSDoc typedefs for AI request/response shapes
 supabase/

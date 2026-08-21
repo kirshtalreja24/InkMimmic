@@ -4,9 +4,9 @@ The mobile counterpart to the Inkmimic webapp — same product, same visual
 identity, same modular architecture, built with Expo + React Native
 instead of Vite + React.
 
-Royal blue + gold "ink and paper" identity, Supabase for auth/storage, and
-the same AI boundary pattern (`ai-core` left empty, `ai-prototype` backed
-by Gemini for testing).
+Royal blue + gold "ink and paper" identity, Supabase for auth, and the
+same AI boundary pattern as the webapp — `ai-core` is a client for the
+FastAPI handwriting model backend (`api/server.py`).
 
 ## Stack
 
@@ -41,12 +41,9 @@ run `supabase/setup.sql` in the SQL editor first.
 
 Same split as the webapp:
 
-- **`src/packages/ai-core/`** — empty on purpose. Implement your real
-  handwriting-generation model here.
-- **`src/packages/ai-prototype/`** — a working Gemini-backed stand-in so
-  the chat screen can be tested today. Add `EXPO_PUBLIC_GEMINI_API_KEY` to
-  `.env` to try it. **Not safe for a released build** — see
-  `src/packages/README.md` for the migration path.
+- **`src/packages/ai-core/`** — the real AI integration. Calls the FastAPI
+  handwriting model backend (`api/server.py`)'s `/api/generate` and
+  `/api/analyze-style` endpoints — see `src/packages/README.md`.
 
 ## Differences from the webapp (by necessity, not by choice)
 
@@ -76,8 +73,7 @@ src/
   hooks/                 useAuth, useSamplePicker
   lib/supabase/          client.js, auth.js, storage.js
   packages/
-    ai-core/             <- implement your real AI integration here
-    ai-prototype/        <- Gemini-backed stand-in, for testing only
+    ai-core/             <- FastAPI handwriting model client
   config/                env.js
   types/                 shared JSDoc typedefs for AI request/response shapes
 supabase/

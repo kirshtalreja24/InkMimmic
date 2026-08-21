@@ -23,6 +23,13 @@ The generation model is **stroke-level**: its input is online pen data —
 `(dx, dy, pen_up)` per point — plus the text, plus a line image for a frozen
 style extractor. That's the key constraint that shaped everything below.
 
+**Scope note:** this runbook covers the research pipeline only (everything
+below) — `app/app.py`'s per-writer upload → fine-tune → generate flow. It
+predates the Inkmimic product layer (`api/`, `inkmimic/`, `inkmimic-mobile/`),
+a separate, stateless, no-fine-tuning frontend over the same generation core.
+See `docs/adr/workflow.md` for both workflows side by side, and
+`CONTEXT.md` for the shared vocabulary.
+
 ---
 
 ## 2. What has been done

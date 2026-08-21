@@ -98,22 +98,13 @@ def extract_line_crops(photo_path: str, binary: np.ndarray, start_idx: int, line
         blobs = [b for word in words for b in word]
         if not blobs:
             continue
-        xs0 = min(b[0] for b in blobs)
-        ys0 = min(b[1] for b in blobs)
-        xs1 = max(b[0] + b[2] for b in blobs)
-        ys1 = max(b[1] + b[3] for b in blobs)
-        pad = 6
-        y0 = max(ys0 - pad, 0)
-        y1 = min(ys1 + pad, binary.shape[0])
-        x0 = max(xs0 - pad, 0)
-        x1 = min(xs1 + pad, binary.shape[1])
-
-        crop = binary[y0:y1, x0:x1]
-        if crop.size == 0 or crop.shape[0] < 8 or crop.shape[1] < 8:
+        bbox = segment.line_bbox(blobs, pad=6, img_shape=binary.shape)
+        crop = segment.crop_line_image(binary, bbox)
+        if crop is None:
             continue
         name = f'line{idx:02d}'
         out_path = lines_out / f'{name}.png'
-        cv2.imwrite(str(out_path), 255 - crop)  # ink=dark, bg=white
+        cv2.imwrite(str(out_path), crop)  # ink=dark, bg=white
         idx += 1
 
     return idx
@@ -475,6 +466,7 @@ with st.expander('6️⃣ Generate handwriting', expanded=False):
                 n_tries=tries,
                 paper=paper,
                 gate=gate,
+                export_format='png',
             )
         st.image(page_path, caption='Generated page', use_container_width=True)
 

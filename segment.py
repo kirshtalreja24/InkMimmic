@@ -147,6 +147,51 @@ def group_into_lines(blobs, gap_factor: float = 1.2):
 
 
 # ---------------------------------------------------------------------------
+# 3b. Line crop extraction -- shared by every caller that needs "a clean
+#     line image" from a page (app.py's segment step, api/server.py's style
+#     extraction, stroke_reconstruct.py's per-page reconstruction). This
+#     bbox/pad/crop/invert math used to be hand-copied three times.
+# ---------------------------------------------------------------------------
+
+def line_bbox(boxes, pad: int = 6, img_shape=None):
+    """Bounding box around a group of (x, y, w, h) boxes -- e.g. one line's
+    blobs, or the rows for one line from a manifest.csv -- padded by `pad`
+    and clamped to `img_shape` (an array's .shape, so (height, width, ...))
+    if given. Returns (x0, y0, x1, y1), or None if `boxes` is empty."""
+    boxes = list(boxes)
+    if not boxes:
+        return None
+
+    xs0 = min(b[0] for b in boxes)
+    ys0 = min(b[1] for b in boxes)
+    xs1 = max(b[0] + b[2] for b in boxes)
+    ys1 = max(b[1] + b[3] for b in boxes)
+
+    x0, y0 = xs0 - pad, ys0 - pad
+    x1, y1 = xs1 + pad, ys1 + pad
+    x0, y0 = max(x0, 0), max(y0, 0)
+    if img_shape is not None:
+        x1 = min(x1, img_shape[1])
+        y1 = min(y1, img_shape[0])
+    return (int(x0), int(y0), int(x1), int(y1))
+
+
+def crop_line_image(binary: np.ndarray, bbox, invert: bool = True, min_size: int = 8):
+    """Crop `binary` to `bbox` (x0, y0, x1, y1) from line_bbox(). If
+    `invert`, flips so ink is dark on a white background (matches how line
+    crops are saved throughout the project). Returns None if the crop is
+    degenerate (empty or smaller than `min_size` in either dimension) --
+    callers should skip that line rather than save a bad crop."""
+    if bbox is None:
+        return None
+    x0, y0, x1, y1 = bbox
+    crop = binary[y0:y1, x0:x1]
+    if crop.size == 0 or crop.shape[0] < min_size or crop.shape[1] < min_size:
+        return None
+    return 255 - crop if invert else crop
+
+
+# ---------------------------------------------------------------------------
 # 4. THE MISSING STEP: split touching/ligature-joined blobs into characters
 # ---------------------------------------------------------------------------
 #

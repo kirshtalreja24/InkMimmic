@@ -1,8 +1,8 @@
-// Shared shape definitions for anything crossing the boundary into an AI
-// package. Kept as plain JSDoc typedefs (not TypeScript) so the project
-// stays a plain JS + Vite setup, but still gives editor autocomplete and a
-// single source of truth for the "contract" both ai-core and ai-prototype
-// should honor.
+// Shared shape definitions for anything crossing the boundary into the AI
+// package (ai-core). Kept as plain JSDoc typedefs (not TypeScript) so the
+// project stays a plain JS + Vite setup, but still gives editor
+// autocomplete and a single source of truth for the request/response
+// contract.
 
 /**
  * @typedef {Object} AiStyleProfile

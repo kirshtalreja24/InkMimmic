@@ -131,6 +131,9 @@ outside it (parens, `$`, `&`, `@`, …) are flagged and replaced with `_`.
 
 ## Docs
 
+- `CONTEXT.md` — project glossary (start here in a new session)
+- `docs/adr/workflow.md` — the two actual end-to-end workflows (research pipeline vs. product)
+- `docs/adr/` — architecture decision records (why things are built the way they are)
 - `plan.md` — how the diffusion backbone was chosen over a from-scratch GAN
 - `diffusion_model/INTEGRATION_GUIDE.md` — how the pieces connect
 - `summary.txt` — the full model & data audit (2026-08-05)
