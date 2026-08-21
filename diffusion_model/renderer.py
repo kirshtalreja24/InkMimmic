@@ -5,8 +5,14 @@ renderer.py — High-quality ink renderer for the HANDWRITER diffusion model.
 Replaces the matplotlib-based utils.show() for product output.
 
 Features:
-  - Anti-aliased stroked polylines (PIL)
-  - Variable stroke width from pen velocity (fast = thin, slow = thick)
+  - Catmull-Rom spline smoothing between the model's raw points, so curves
+    read as flowing pen strokes instead of the straight-edged polygon you
+    get from connecting ~16 points/character with straight lines
+  - Supersampled rendering (draw at N x resolution, downsample with
+    LANCZOS) for real anti-aliased edges, replacing the old same-color
+    overdraw trick which fattened lines without actually softening them
+  - Variable stroke width from pen velocity (fast = thin, slow = thick),
+    with rounded joints so width changes don't leave gaps at sharp turns
   - Configurable ink color + paper background (blank / ruled / graph)
   - Margins + DPI control
 """
@@ -46,28 +52,6 @@ def strokes_to_abs_points(strokes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return points, pen_up
 
 
-def compute_velocities(points: np.ndarray, pen_up: np.ndarray) -> np.ndarray:
-    """Per-point velocity magnitude (distance moved per step)."""
-    pen_up = np.asarray(pen_up).reshape(-1)
-    diffs = np.linalg.norm(np.diff(points, axis=0), axis=1)
-    velocities = np.concatenate([[diffs[0] if len(diffs) else 0.0], diffs])
-
-    # pen_up should have exactly one entry per point (same length as
-    # velocities). If it doesn't -- e.g. a malformed/short stroke sequence
-    # upstream -- align it instead of crashing: truncate if too long, pad
-    # with "pen down" (0.0) if too short.
-    n = velocities.shape[0]
-    if pen_up.shape[0] != n:
-        if pen_up.shape[0] > n:
-            pen_up = pen_up[:n]
-        else:
-            pen_up = np.concatenate([pen_up, np.zeros(n - pen_up.shape[0], dtype=pen_up.dtype)])
-
-    # Zero velocity at pen-up boundaries to force thin/dashed transitions
-    velocities[pen_up > 0.5] = 0.0
-    return velocities
-
-
 def stroke_width_from_velocity(
     velocities: np.ndarray,
     min_width: float = 1.0,
@@ -84,6 +68,53 @@ def stroke_width_from_velocity(
     return widths
 
 
+def _split_pen_down_segments(pen_up: np.ndarray) -> list[tuple[int, int]]:
+    """Group point indices into contiguous pen-down runs (end exclusive),
+    dropping single-point runs (nothing to draw a line between)."""
+    n = len(pen_up)
+    segments = []
+    start = 0
+    for i in range(1, n):
+        if pen_up[i] > 0.5:
+            if i - start >= 2:
+                segments.append((start, i))
+            start = i
+    if n - start >= 2:
+        segments.append((start, n))
+    return segments
+
+
+def _catmull_rom_smooth(points: np.ndarray, samples_per_span: int = 8) -> np.ndarray:
+    """Densify one pen-down segment via Catmull-Rom spline interpolation.
+
+    The model outputs roughly one point per ~1/16th of a character, which
+    is sparse enough that connecting them with straight lines produces
+    visibly faceted, robotic-looking letters. Interpolating a smooth curve
+    through the same points (rather than just adding more straight
+    segments) is what makes the rendered ink look hand-drawn.
+    """
+    n = len(points)
+    if n < 3:
+        return points.astype(np.float64)
+
+    # Duplicate the endpoints so the spline has a defined tangent there.
+    ext = np.vstack([points[0], points, points[-1]])  # length n + 2
+
+    out = [points[0].astype(np.float64)]
+    for i in range(n - 1):
+        p0, p1, p2, p3 = ext[i], ext[i + 1], ext[i + 2], ext[i + 3]
+        for t in np.linspace(0, 1, samples_per_span, endpoint=True)[1:]:
+            t2, t3 = t * t, t * t * t
+            pt = 0.5 * (
+                (2 * p1)
+                + (-p0 + p2) * t
+                + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
+                + (-p0 + 3 * p1 - 3 * p2 + p3) * t3
+            )
+            out.append(pt)
+    return np.array(out)
+
+
 def render_strokes(
     strokes: np.ndarray,
     out_path: str,
@@ -95,6 +126,8 @@ def render_strokes(
     max_width: float = 3.5,
     margin: int = 8,
     line_spacing: float = 1.6,
+    smooth: bool = True,
+    supersample: int = 3,
 ) -> str:
     """Render a stroke sequence to a PNG using PIL.
 
@@ -109,6 +142,10 @@ def render_strokes(
     min_width / max_width : stroke width bounds in px
     margin : page margin in px
     line_spacing : line spacing as multiple of height (for multi-line pages)
+    smooth : apply Catmull-Rom curve smoothing (set False to get the old
+        straight-segment look, e.g. for debugging raw model output)
+    supersample : draw at this many times the target resolution, then
+        downsample with LANCZOS for anti-aliased edges (1 disables it)
 
     Returns
     -------
@@ -120,9 +157,7 @@ def render_strokes(
         raise ValueError("No points to render")
 
     # Guard against pen_up not having exactly one entry per point (seen with
-    # some short/edge-case stroke sequences from the model). Align it here,
-    # once, so every downstream use (compute_velocities, the draw loop) can
-    # safely assume len(pen_up) == len(points).
+    # some short/edge-case stroke sequences from the model).
     pen_up = np.asarray(pen_up).reshape(-1)
     if pen_up.shape[0] != points.shape[0]:
         n = points.shape[0]
@@ -132,8 +167,6 @@ def render_strokes(
             pen_up = np.concatenate([pen_up, np.zeros(n - pen_up.shape[0], dtype=pen_up.dtype)])
 
     # Scale coordinates so the stroke extents map to the target height
-    # The model's coordinate space is std-normalized; we use the y-extent
-    # to fit the desired line height.
     xs, ys = points[:, 0], points[:, 1]
     y_span = np.ptp(ys)
     if y_span < 1e-6:
@@ -144,57 +177,56 @@ def render_strokes(
     # DOWN, so invert to keep ascenders above the baseline.
     py = ((np.max(ys) - points[:, 1]) * s).astype(np.float64)
 
-    # Canvas size
-    x_min, x_max = 0, np.max(px)
-    y_min, y_max = 0, np.max(py)
-    W = int(x_max + margin * 2)
-    H = int(y_max + margin * 2)
-    W = max(W, 10)
-    H = max(H, 10)
+    # Canvas size, at the FINAL (post-scale) resolution
+    W = max(int(np.max(px) + margin * 2), 10)
+    H = max(int(np.max(py) + margin * 2), 10)
 
-    # Paper background
+    SS = max(1, int(supersample))
+    cW, cH = W * SS, H * SS
+
+    # Paper background, drawn at the supersampled resolution
     if paper == 'ruled':
-        # Light blue horizontal rules
-        img = Image.new('RGB', (W, H), 'white')
+        img = Image.new('RGB', (cW, cH), 'white')
         draw = ImageDraw.Draw(img)
-        rule_spacing = max(4, int(height * 0.35))
-        for yy in range(margin, H - margin, rule_spacing):
-            draw.line([(0, yy), (W, yy)], fill=(180, 200, 240), width=1)
+        rule_spacing = max(4, int(height * 0.35)) * SS
+        for yy in range(margin * SS, cH - margin * SS, rule_spacing):
+            draw.line([(0, yy), (cW, yy)], fill=(180, 200, 240), width=max(1, SS))
     elif paper == 'graph':
-        img = Image.new('RGB', (W, H), 'white')
+        img = Image.new('RGB', (cW, cH), 'white')
         draw = ImageDraw.Draw(img)
-        grid = max(4, int(height * 0.25))
-        for xx in range(0, W, grid):
-            draw.line([(xx, 0), (xx, H)], fill=(220, 225, 235), width=1)
-        for yy in range(0, H, grid):
-            draw.line([(0, yy), (W, yy)], fill=(220, 225, 235), width=1)
+        grid = max(4, int(height * 0.25)) * SS
+        for xx in range(0, cW, grid):
+            draw.line([(xx, 0), (xx, cH)], fill=(220, 225, 235), width=max(1, SS))
+        for yy in range(0, cH, grid):
+            draw.line([(0, yy), (cW, yy)], fill=(220, 225, 235), width=max(1, SS))
     else:
-        img = Image.new('RGB', (W, H), 'white')
+        img = Image.new('RGB', (cW, cH), 'white')
 
     draw = ImageDraw.Draw(img)
 
-    # Draw strokes segment by segment (breaks at pen-up)
-    velocities = compute_velocities(np.column_stack([px, py]), pen_up)
-    widths = stroke_width_from_velocity(velocities, min_width, max_width)
+    for start, end in _split_pen_down_segments(pen_up):
+        seg = np.column_stack([px[start:end], py[start:end]]) * SS
 
-    # To preserve the stroke-width-per-point mapping, draw each tiny segment
-    # as its own line with the width of its start point.
-    for i in range(1, len(px)):
-        if pen_up[i] > 0.5:
-            continue  # pen lifted: no ink between i-1 and i
+        if smooth and len(seg) >= 3:
+            seg = _catmull_rom_smooth(seg)
 
-        w = max(0.5, widths[i - 1])
-        x0, y0 = margin + px[i - 1], margin + py[i - 1]
-        x1, y1 = margin + px[i], margin + py[i]
+        diffs = np.diff(seg, axis=0)
+        velocities = np.linalg.norm(diffs, axis=1)
+        velocities = np.concatenate([[velocities[0] if len(velocities) else 0.0], velocities])
+        widths = stroke_width_from_velocity(velocities, min_width * SS, max_width * SS)
 
-        # Anti-aliasing: draw a slightly wider line first (overdraw)
-        draw.line([(x0, y0), (x1, y1)], fill=ink_color, width=int(w * 2))
-        draw.line([(x0, y0), (x1, y1)], fill=ink_color, width=int(w * 1.25))
-        draw.line([(x0, y0), (x1, y1)], fill=ink_color, width=int(w))
+        for i in range(1, len(seg)):
+            w = max(1.0, widths[i - 1])
+            x0, y0 = margin * SS + seg[i - 1]
+            x1, y1 = margin * SS + seg[i]
+            draw.line([(x0, y0), (x1, y1)], fill=ink_color, width=int(round(w)))
+            # Round the joint so variable width doesn't leave visible gaps
+            # at sharp turns between adjacent segments.
+            r = w / 2
+            draw.ellipse([x1 - r, y1 - r, x1 + r, y1 + r], fill=ink_color)
 
-    # Scale up the whole canvas if requested
-    if scale != 1.0:
-        img = img.resize((int(W * scale), int(H * scale)), Image.LANCZOS)
+    final_W, final_H = max(1, int(W * scale)), max(1, int(H * scale))
+    img = img.resize((final_W, final_H), Image.LANCZOS)
 
     img.save(out_path)
     return out_path
@@ -211,12 +243,15 @@ def main():
     parser.add_argument('--ink', default='#1a1a2e', help='Ink color (hex)')
     parser.add_argument('--paper', choices=['white', 'ruled', 'graph'], default='white')
     parser.add_argument('--scale', type=float, default=1.0)
+    parser.add_argument('--no-smooth', action='store_true', help='Disable Catmull-Rom smoothing')
+    parser.add_argument('--supersample', type=int, default=3, help='Anti-aliasing supersample factor')
     args = parser.parse_args()
 
     strokes = np.load(args.strokes).astype(np.float32)
     render_strokes(strokes, args.out, height=args.height, ink_color=args.ink,
-                   paper=args.paper, scale=args.scale)
-    print(f"Saved → {args.out}")
+                   paper=args.paper, scale=args.scale, smooth=not args.no_smooth,
+                   supersample=args.supersample)
+    print(f"Saved -> {args.out}")
 
 
 if __name__ == '__main__':

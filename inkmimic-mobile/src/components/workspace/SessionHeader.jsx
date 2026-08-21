@@ -9,7 +9,7 @@ const STATUS_COPY = {
   error: 'Something went wrong',
 };
 
-export function SessionHeader({ userEmail, state, onCloseSession }) {
+export function SessionHeader({ userEmail, state, onCloseSession, onOpenGallery }) {
   return (
     <View className="gap-4 border-b border-royal-500/15 pb-6">
       <View>
@@ -28,12 +28,20 @@ export function SessionHeader({ userEmail, state, onCloseSession }) {
             {STATUS_COPY[state] ?? state}
           </Text>
         </View>
-        <Pressable
-          onPress={onCloseSession}
-          className="rounded-full border border-parchment/30 px-4 py-2"
-        >
-          <Text className="font-bodySemibold text-xs text-parchment">Close session</Text>
-        </Pressable>
+        <View className="flex-row items-center gap-2">
+          <Pressable
+            onPress={onOpenGallery}
+            className="rounded-full border border-parchment/30 px-4 py-2"
+          >
+            <Text className="font-bodySemibold text-xs text-parchment">Past generations</Text>
+          </Pressable>
+          <Pressable
+            onPress={onCloseSession}
+            className="rounded-full border border-parchment/30 px-4 py-2"
+          >
+            <Text className="font-bodySemibold text-xs text-parchment">Close session</Text>
+          </Pressable>
+        </View>
       </View>
     </View>
   );

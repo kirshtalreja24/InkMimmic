@@ -198,11 +198,21 @@ async def generate(
                 style_image_path=style_path,
                 out_dir=out_dir,
                 max_chars_per_line=max(15, min(max_chars, 80)),
-                n_tries=max(1, min(tries, 3)),
+                n_tries=max(1, min(tries, 5)),
+                min_score=0.7,
                 ink_color=ink_color,
                 paper=paper,
                 export_format="png",
-                gate=get_gate(),
+                # The classifier gate's read-back currently scores every
+                # attempt ~0 -- not because the classifier is wrong, but
+                # because split_into_characters() (tuned for photographed
+                # prose) over-segments this renderer's joined-cursive
+                # strokes into fragments that were never real single
+                # letters (e.g. "The" -> 5 crops instead of 3), so it has
+                # nothing meaningful to classify. Falling back to the
+                # ink-density heuristic (gate=None) until that segmentation
+                # heuristic is re-tuned for synthetic renders specifically.
+                gate=None,
             )
 
             png_file = os.path.join(out_dir, "page_output.png")

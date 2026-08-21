@@ -60,7 +60,7 @@ Training the diffusion decoder (never the style extractor) on one writer's recon
 The pretrained starting checkpoint (from the public IAM handwriting database), always kept and never overwritten by a per-writer fine-tune.
 
 **Best-of-N / legibility gate**:
-Since generation starts from random noise, several attempts are generated per page and the most legible one is kept — scored either by a trained classifier's read-back or a cheaper ink-density heuristic.
+Since generation starts from random noise, several attempts are generated per page and the most legible one is kept — scored either by a trained classifier's read-back or a cheaper ink-density heuristic. The classifier path is currently disabled on the product path (`api/server.py` passes `gate=None`): `segment.py`'s `split_into_characters()` (built for photographed prose) over-segments the renderer's joined-cursive strokes into fragments that were never real single letters, so the classifier's read-back score is unusable noise (always ~0) — not a fault of the classifier itself. Falls back to the ink-density heuristic until that segmentation heuristic is re-tuned for synthetic renders. See `segment.segment_rendered_line()` (added alongside `segment_handwriting()`) for the related fix that stopped the *photo* preprocessing pipeline from being run on rendered lines at all (it was force-upscaling small renders 5-15x and crashing on some outputs).
 
 **Transcript**:
 The typed ground-truth text for a line, keyed by line name — required to build fine-tuning training pairs.
@@ -75,16 +75,13 @@ _Avoid_: user (this repo has two unrelated "user" concepts — see Writer above)
 The signed-in Account's Supabase authentication session — signing in, staying signed in, signing out.
 
 **Local mode**:
-A dev/demo fallback that activates when Supabase isn't configured — auth calls accept any email/password and fabricate a Session stored on-device, so the product can be exercised without real credentials.
-
-**Guest access**:
-The "Continue as Guest" button — signs in with one shared hardcoded demo credential. Not a real anonymous-account feature.
+A dev/demo fallback that activates when Supabase isn't configured (or a Supabase call fails on a network error) — auth calls accept any email/password and fabricate a Session stored on-device. Login is otherwise mandatory: there is no guest/skip-sign-in path (removed), and every route but the auth screen requires a Session.
 
 **Workspace**:
 The screen where a signed-in Account submits a prompt and Sample and views the resulting Artifact.
 
 **Sample**:
-The user's uploaded or captured handwriting reference image, attached to a generation request.
+The user's uploaded or captured handwriting reference image, attached to a generation request. Saved to the `handwriting-samples` Supabase Storage bucket (per-Account folder) when Supabase is configured; see `packages/inkmimic-core/src/persistence.js`.
 
 **Artifact**:
-The generated result of one request — `{ id, kind: 'image'|'text', content, note }`. Ephemeral: held only in memory for the current Workspace visit, never persisted.
+The generated result of one request — `{ id, kind: 'image'|'text', content, note }`. Saved to the `generated-artifacts` Storage bucket plus a `public.artifacts` row (prompt, paper, ink color, storage path) when Supabase is configured — best-effort, non-blocking, so a save failure never hides a successful generation. In local mode (no Supabase) it stays in-memory only, as before. See `supabase/setup.sql` in each app for the bucket/table/RLS definitions.

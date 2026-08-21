@@ -378,7 +378,42 @@ def segment_handwriting(image_path: str, output_dir: str, remove_ruled_lines: st
     """
     os.makedirs(output_dir, exist_ok=True)
     binary = preprocess(image_path, remove_ruled_lines=remove_ruled_lines)
+    return _segment_from_binary(binary, image_path, output_dir, mode, debug_overlay)
 
+
+def segment_rendered_line(image_path: str, output_dir: str, mode: str = "auto",
+                           debug_overlay: bool = False):
+    """Character-segment a line PNG that our OWN renderer.py produced (used
+    by generate_page.py's legibility gate to read back generated text),
+    as opposed to a photographed page.
+
+    segment_handwriting()'s preprocess() step is built for phone photos --
+    it force-upscales anything narrower than 2000px (preprocessing.py's
+    target_width) through cubic interpolation, then runs Sauvola
+    thresholding tuned for photo noise, plus deskew/perspective/shadow
+    removal that a computer-rendered image never needs. Running a small
+    (~a few hundred px) rendered line through that pipeline blows it up
+    ~5-15x and blurs the thin anti-aliased strokes before they're even
+    thresholded, which made the legibility gate's read-back unreliable
+    regardless of how many attempts/score threshold generate_page.py used.
+    A rendered line is already clean (flat lighting, no skew, high
+    contrast) -- it just needs a plain threshold at native resolution.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    img = cv2.imread(image_path)
+    if img is None:
+        raise FileNotFoundError(f"Could not read image: {image_path}")
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # Otsu finds a threshold that best separates two dominant intensity
+    # clusters -- ink is far darker than both white paper and the faint
+    # ruled/graph background lines renderer.py may have drawn, so those
+    # never get picked up as ink here.
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    return _segment_from_binary(binary, image_path, output_dir, mode, debug_overlay)
+
+
+def _segment_from_binary(binary: np.ndarray, image_path: str, output_dir: str,
+                          mode: str = "auto", debug_overlay: bool = False):
     blobs = find_blobs(binary)
     lines = group_into_lines(blobs)
     print(f"Detected {len(lines)} line(s) of text.")

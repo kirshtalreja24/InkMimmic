@@ -114,13 +114,20 @@ def score_generation(gate, image_path, expected_text):
         key = c[0] if c and c[0].isalnum() else c
         char_map[c] = key
 
-    # Segment the generated line back into characters using the project's segment.py
+    # Segment the generated line back into characters using the project's segment.py.
+    # segment_rendered_line() (not segment_handwriting()) matters here: the
+    # latter runs the phone-photo pipeline -- forced upscale to 2000px,
+    # Sauvola thresholding tuned for photo noise, deskew/perspective/shadow
+    # removal -- none of which a clean computer-rendered line needs or
+    # survives well. On a short line it was observed detecting 6 bogus
+    # "lines" and 57 "characters" out of literally two real letters, with
+    # one degenerate crop crashing this function entirely.
     project_root = THIS_DIR.parent
     sys.path.insert(0, str(project_root))
     try:
         import segment
         work_dir = image_path + '_seg'
-        segment.segment_handwriting(image_path, work_dir, mode='auto')
+        segment.segment_rendered_line(image_path, work_dir, mode='auto')
         import csv
         manifest = os.path.join(work_dir, 'manifest.csv')
         if not os.path.exists(manifest):
@@ -137,8 +144,15 @@ def score_generation(gate, image_path, expected_text):
     with torch.no_grad():
         preds = []
         for p in crops:
-            img = load_grayscale(p)
-            x = tfm(img).unsqueeze(0).to(device)
+            try:
+                img = load_grayscale(p)
+                x = tfm(img).unsqueeze(0).to(device)
+            except Exception:  # noqa: BLE001
+                # A single degenerate crop (e.g. a zero-width slice from a
+                # noisy split) shouldn't crash scoring for the whole line --
+                # treat it as unreadable and keep going.
+                preds.append('_')
+                continue
             probs = F.softmax(model(x), dim=1)[0]
             conf, idx = probs.max(dim=0)
             if conf.item() < 0.4:
@@ -189,14 +203,23 @@ class PageGenerator:
         style_image_path,
         out_dir,
         max_chars_per_line=45,
-        n_tries=3,
+        n_tries=5,
+        min_score=0.7,
         ink_color='#1a1a2e',
         paper='white',
         line_height=128,
         gate=None,
         export_format='pdf',
     ):
-        """Generate a full page (word-wrapped, best-of-N) and return the path.
+        """Generate a full page (word-wrapped) and return the path.
+
+        Each line is generated and retried independently (up to n_tries
+        attempts) until its classifier read-back score reaches min_score,
+        keeping the best-scoring attempt seen if none clears the bar. This
+        matters because a garbled line (missing/repeated letters -- a known
+        failure mode of this model's non-monotonic text attention, see
+        nn.py's MultiHeadAttention) would otherwise sink an entire page's
+        best-of-N average even when every other line came out fine.
 
         export_format: 'png', 'pdf' (default), or 'both'. Controls which
         file(s) the final composed page is saved as.
@@ -208,14 +231,16 @@ class PageGenerator:
         if not lines:
             raise ValueError('No text to generate.')
 
-        best_score = -1.0
-        best_lines = None
-        best_strokes = None
+        final_images = []
+        final_strokes = []
+        final_scores = []
 
-        for attempt in range(n_tries):
-            line_images = []
-            line_strokes = []
-            for i, line in enumerate(lines):
+        for i, line in enumerate(lines):
+            best_line_score = -1.0
+            best_img_path = None
+            best_line_strokes = None
+
+            for attempt in range(n_tries):
                 # run_batch_inference always returns a BATCHED array of shape
                 # (batch_size, time_steps, 3), even for a single line of text
                 # (it wraps the input in a batch of size 1 internally). Take
@@ -238,34 +263,34 @@ class PageGenerator:
                     diffusion_mode='new', show_samples=False,
                     path=raw_preview_path,
                 )[0]
-                print(f"  [DEBUG] line {i:02d} strokes shape={strokes.shape} "
-                      f"min={strokes.min():.4f} max={strokes.max():.4f} "
-                      f"mean={strokes.mean():.4f} pen_up_frac={(strokes[:, 2] > 0.5).mean():.3f}")
                 img_path = os.path.join(out_dir, f'_try{attempt}_line{i:02d}.png')
                 renderer.render_strokes(strokes, img_path, height=line_height,
                                         ink_color=ink_color, paper=paper)
-                line_images.append(img_path)
-                line_strokes.append(strokes)
+                score = score_generation(gate, img_path, line)
+                print(f"  Line {i:02d} attempt {attempt + 1}/{n_tries}: score {score:.3f}")
 
-            # Score the whole page: average per-line read-back
-            scores = []
-            for i, line in enumerate(lines):
-                scores.append(score_generation(gate, line_images[i], line))
-            page_score = float(np.mean(scores)) if scores else 0.0
-            print(f"  Attempt {attempt + 1}/{n_tries}: score {page_score:.3f}")
+                if score > best_line_score:
+                    best_line_score = score
+                    best_img_path = img_path
+                    best_line_strokes = strokes
 
-            if page_score > best_score:
-                best_score = page_score
-                best_lines = list(line_images)
-                best_strokes = list(line_strokes)
+                if best_line_score >= min_score:
+                    break
 
-        # Compose the best attempt into a single page image
+            final_images.append(best_img_path)
+            final_strokes.append(best_line_strokes)
+            final_scores.append(best_line_score)
+
+        page_score = float(np.mean(final_scores)) if final_scores else 0.0
+        print(f"  Page score: {page_score:.3f} (per-line: "
+              f"{[round(s, 2) for s in final_scores]})")
+
+        # Compose the (per-line best) result into a single page image
         page_paths = self._compose_page(
-            best_lines, best_strokes, out_dir, line_height, paper, export_format
+            final_images, final_strokes, out_dir, line_height, paper, export_format
         )
-        print(f"  Best score: {best_score:.3f}")
         for p in page_paths:
-            print(f"  Page → {p}")
+            print(f"  Page -> {p}")
         # Keep return type backward-compatible: single path if only one format
         # was requested, otherwise return the list (png first, pdf second).
         return page_paths[0] if len(page_paths) == 1 else page_paths
@@ -313,7 +338,8 @@ def main():
     parser.add_argument('--style', required=True, help='Style reference line image')
     parser.add_argument('--out', default='./generated_pages')
     parser.add_argument('--max_chars', type=int, default=45, help='Max chars per line')
-    parser.add_argument('--tries', type=int, default=3, help='Best-of-N stochastic retries')
+    parser.add_argument('--tries', type=int, default=5, help='Max per-line retries until --min_score is met')
+    parser.add_argument('--min_score', type=float, default=0.7, help='Per-line read-back score to accept early')
     parser.add_argument('--ink', default='#1a1a2e')
     parser.add_argument('--paper', choices=['white', 'ruled', 'graph'], default='white')
     parser.add_argument('--height', type=int, default=128, help='Line height in px')
@@ -326,7 +352,7 @@ def main():
     generator = PageGenerator(weights_path=args.weights)
     generator.generate_page(
         args.text, args.style, args.out,
-        max_chars_per_line=args.max_chars, n_tries=args.tries,
+        max_chars_per_line=args.max_chars, n_tries=args.tries, min_score=args.min_score,
         ink_color=args.ink, paper=args.paper, line_height=args.height, gate=gate,
         export_format=args.format,
     )

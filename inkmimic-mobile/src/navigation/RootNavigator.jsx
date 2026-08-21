@@ -4,8 +4,8 @@ import LandingScreen from '../screens/LandingScreen.jsx';
 import AboutScreen from '../screens/AboutScreen.jsx';
 import AuthScreen from '../screens/AuthScreen.jsx';
 import ChatWorkspaceScreen from '../screens/ChatWorkspaceScreen.jsx';
+import GalleryScreen from '../screens/GalleryScreen.jsx';
 import { useAuth } from '../hooks/useAuth.js';
-import { isSupabaseConfigured } from '../config/env.js';
 
 const Stack = createNativeStackNavigator();
 
@@ -28,12 +28,13 @@ const navTheme = {
 export function RootNavigator() {
   const { isAuthenticated, loading } = useAuth();
 
-  // Without Supabase configured there's no session to check — let Workspace
-  // through so the UI (and handwriting chat) can still be exercised
-  // during setup, same fallback the webapp uses.
-  const showWorkspace = !isSupabaseConfigured || isAuthenticated;
+  // Login is mandatory even without Supabase configured — signing in still
+  // works in that case via the local-mode fallback in session.js (any
+  // email/password creates a fabricated on-device session), so there's
+  // always a real sign-in step to check here.
+  const showWorkspace = isAuthenticated;
 
-  if (isSupabaseConfigured && loading) return null; // brief splash-equivalent
+  if (loading) return null; // brief splash-equivalent
 
   return (
     <NavigationContainer theme={navTheme}>
@@ -45,6 +46,7 @@ export function RootNavigator() {
         // safe to make, since the screen doesn't exist until this swap.
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Workspace" component={ChatWorkspaceScreen} />
+          <Stack.Screen name="Gallery" component={GalleryScreen} />
         </Stack.Navigator>
       ) : (
         <Stack.Navigator screenOptions={{ headerShown: false }}>

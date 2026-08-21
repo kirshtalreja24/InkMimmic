@@ -35,7 +35,7 @@ export function createAiCoreClient({ apiUrl, buildSamplePart, genId = () => `${D
     formData.append('prompt', prompt.trim());
     formData.append('ink_color', inkColor);
     formData.append('paper', paper);
-    formData.append('tries', '1');
+    formData.append('tries', '5');
 
     const samplePart = sample ? buildSamplePart(sample) : null;
     if (samplePart) {

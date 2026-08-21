@@ -3,6 +3,7 @@ import LandingPage from './pages/LandingPage.jsx';
 import AboutUsPage from './pages/AboutUsPage.jsx';
 import AuthPage from './pages/AuthPage.jsx';
 import ChatWorkspace from './pages/ChatWorkspace.jsx';
+import GalleryPage from './pages/GalleryPage.jsx';
 import { ProtectedRoute } from './components/layout/ProtectedRoute.jsx';
 
 export const router = createBrowserRouter([
@@ -14,6 +15,14 @@ export const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <ChatWorkspace />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/gallery',
+    element: (
+      <ProtectedRoute>
+        <GalleryPage />
       </ProtectedRoute>
     ),
   },

@@ -23,7 +23,7 @@ Run via `api/server.py` (FastAPI) plus either `inkmimic/` (web) or `inkmimic-mob
 1. Start the backend: `uvicorn api.server:app --host 0.0.0.0 --port 8000 --reload`.
 2. Start the web app (`npm run dev` in `inkmimic/inkmimic/`) or the mobile app (`expo start` in `inkmimic-mobile/`).
 3. A signed-in Account opens the Workspace, attaches a Sample (optional) and a prompt, and submits.
-4. `ai-core` POSTs to `/api/generate`; the server extracts a usable style line from the Sample (`extract_style_reference`), then calls `PageGenerator.generate_page(..., gate=get_gate())` — scored with the same classifier legibility gate Workflow A uses (loaded once at server startup). Returns a base64 PNG as an Artifact.
+4. `ai-core` POSTs to `/api/generate`; the server extracts a usable style line from the Sample (`extract_style_reference`), then calls `PageGenerator.generate_page(..., gate=None)` — the classifier legibility gate is currently disabled here (falls back to the ink-density heuristic; see CONTEXT.md's Best-of-N entry for why) pending a re-tuned segmentation heuristic for synthetic renders. Returns a base64 PNG as an Artifact.
 5. The Artifact renders in the Workspace and is not persisted anywhere — no DB row, no Supabase Storage write, despite `lib/supabase/storage.js` existing on both apps for exactly this purpose and never being called. This is the top go-live gap (ADR 0007).
 
 **Other go-live gaps (ADR 0007):** `api/server.py` currently allows CORS from any origin (`allow_origins=["*"]`), has no real deployment target, and has no rate limiting on a public generation endpoint.

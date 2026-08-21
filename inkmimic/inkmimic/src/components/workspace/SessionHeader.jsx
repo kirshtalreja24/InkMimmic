@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom';
+
 const STATUS_COPY = {
   idle: 'Waiting for a sample',
   fileDropped: 'Sample ready',
@@ -22,6 +24,9 @@ export function SessionHeader({ userEmail, state, onCloseSession }) {
           <StatusDot state={state} />
           {STATUS_COPY[state] ?? state}
         </span>
+        <Link to="/gallery" className="btn-outline !px-5 !py-2 text-sm">
+          Past generations
+        </Link>
         <button onClick={onCloseSession} className="btn-outline !px-5 !py-2 text-sm">
           Close session
         </button>

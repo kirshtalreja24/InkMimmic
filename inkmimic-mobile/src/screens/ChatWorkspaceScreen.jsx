@@ -6,7 +6,7 @@ import { ChatPanel } from '../components/workspace/ChatPanel.jsx';
 import { ArtifactPreview } from '../components/workspace/ArtifactPreview.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 
-export default function ChatWorkspaceScreen() {
+export default function ChatWorkspaceScreen({ navigation }) {
   const [state, setState] = useState('idle');
   const [artifact, setArtifact] = useState(null);
   const { user, signOut } = useAuth();
@@ -27,7 +27,12 @@ export default function ChatWorkspaceScreen() {
   return (
     <LinearGradient colors={['#080B22', '#0C1030', '#10143B']} className="flex-1">
       <ScrollView contentContainerStyle={{ paddingBottom: 48 }} className="px-6 pt-16">
-        <SessionHeader userEmail={user?.email} state={state} onCloseSession={handleCloseSession} />
+        <SessionHeader
+          userEmail={user?.email}
+          state={state}
+          onCloseSession={handleCloseSession}
+          onOpenGallery={() => navigation.navigate('Gallery')}
+        />
 
         <View className="mt-6">
           <ChatPanel state={state} onStateChange={setState} onArtifact={setArtifact} />

@@ -1,15 +1,13 @@
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth.js';
-import { isSupabaseConfigured } from '../../config/env.js';
 
 export function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
 
-  // Without Supabase configured there's no session to check — let the
-  // workspace through so the UI (and handwriting chat) can still be
-  // exercised during setup.
-  if (!isSupabaseConfigured) return children;
-
+  // Login is mandatory even without Supabase configured — signing in still
+  // works in that case via the local-mode fallback in session.js (any
+  // email/password creates a fabricated on-device session), so there's
+  // always a real sign-in step to check here.
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-ink-950">

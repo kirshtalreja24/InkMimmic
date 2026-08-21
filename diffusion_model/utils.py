@@ -28,7 +28,7 @@ def show(strokes, name='', show_output=True, scale=1):
             prev_ind = ind
         
     plt.axis('off')
-    if name: plt.savefig('./' + name + '.png', bbox_inches='tight')
+    if name: plt.savefig(name + '.png', bbox_inches='tight')
     if show_output:  plt.show()
     else: plt.close()
     

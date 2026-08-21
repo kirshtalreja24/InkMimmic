@@ -3,17 +3,10 @@ import { Link, useNavigate } from 'react-router-dom';
 import { LoginForm } from '../components/auth/LoginForm.jsx';
 import { RegisterForm } from '../components/auth/RegisterForm.jsx';
 import { isSupabaseConfigured } from '../config/env.js';
-import { signInWithPassword } from '../lib/supabase/auth.js';
 
 export default function AuthPage() {
   const [mode, setMode] = useState('login'); // login | register
   const navigate = useNavigate();
-
-  async function handleGuestAccess() {
-    await signInWithPassword('guest@inkmimic.local', 'password123');
-    navigate('/workspace');
-  }
-
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-ink-950 bg-ink-grain px-6 py-16">
@@ -35,7 +28,7 @@ export default function AuthPage() {
 
           {!isSupabaseConfigured && (
             <p className="mt-4 rounded-lg bg-royal-500/10 px-4 py-2.5 text-xs leading-relaxed text-parchment/70">
-              Running in local mode. You can sign in or create an account with any email/password, or continue as guest below.
+              Supabase isn't configured yet. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your .env file to enable authentication.
             </p>
           )}
 
@@ -52,18 +45,6 @@ export default function AuthPage() {
               />
             )}
           </div>
-
-          <div className="mt-6 border-t border-royal-500/15 pt-6 text-center">
-            <button
-              type="button"
-              onClick={handleGuestAccess}
-              className="text-xs font-semibold text-gold-300/80 hover:text-gold-300 hover:underline"
-            >
-              Continue as Guest (Skip Sign In) →
-            </button>
-          </div>
-
-
         </div>
       </div>
     </div>

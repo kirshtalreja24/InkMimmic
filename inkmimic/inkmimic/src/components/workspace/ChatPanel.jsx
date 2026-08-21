@@ -1,10 +1,14 @@
 import { useState } from 'react';
 import { generateHandwrittenArtifact } from '../../packages/ai-core/index.js';
+import { uploadHandwritingSample } from '../../lib/supabase/storage.js';
+import { saveArtifact } from '../../lib/supabase/persistence.js';
+import { useAuth } from '../../hooks/useAuth.js';
 import { FileDropZone } from './FileDropZone.jsx';
 
 const DEFAULT_PROMPT = 'Write down notes in realistic natural handwriting.';
 
 export function ChatPanel({ state, onStateChange, onArtifact }) {
+  const { user } = useAuth();
   const [file, setFile] = useState(null);
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [paper, setPaper] = useState('white');
@@ -38,6 +42,26 @@ export function ChatPanel({ state, onStateChange, onArtifact }) {
       });
       onArtifact(artifact);
       onStateChange('regenerated');
+
+      // Best-effort persistence: a failed save shouldn't hide a successful
+      // generation, so this never affects the state shown above.
+      if (user?.id) {
+        Promise.resolve()
+          .then(async () => {
+            if (file) await uploadHandwritingSample(user.id, file);
+            await saveArtifact({
+              userId: user.id,
+              artifactId: artifact.id,
+              dataUri: artifact.content,
+              prompt,
+              paper,
+              inkColor,
+            });
+          })
+          .catch((persistErr) => {
+            console.warn('Failed to save artifact to Supabase:', persistErr);
+          });
+      }
     } catch (err) {
       setErrorMessage(err.message ?? 'The model timed out. Try again.');
       onStateChange('error');
