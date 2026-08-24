@@ -4,6 +4,20 @@ Turn a few photographs of your handwriting into a per-user model that can
 generate new text in that style — then render assignment-length pages from
 plain typed text.
 
+The repo has two parts that share the same generation core
+(`diffusion_model/generate_page.py`) but are otherwise independent — see
+`docs/adr/workflow.md` for the full split:
+
+- **Workflow A — research pipeline** (below): per-writer fine-tuning,
+  driven by `app/app.py` or the CLI. FYP/research artifact, not part of the
+  live product.
+- **Workflow B — Inkmimic product**: a stateless FastAPI backend
+  (`api/server.py`) plus a web app (`inkmimic/inkmimic/`) and mobile app
+  (`inkmimic-mobile/`) that call it. No per-writer fine-tuning — style
+  transfer from whatever sample image the request supplies. This is what's
+  live for real users; see [Running the product](#running-the-product-inkmimic)
+  below.
+
 ```
 page photos ──▶ segmentation ──▶ line crops ──▶ stroke reconstruction
    (segment.py)   (preprocessing.py)   (stroke_reconstruct.py)
@@ -25,14 +39,18 @@ typed text ───────────────────────
 | `training/` | `SmallCNN` character classifier (62 classes) + auto-labeling + the line-scoring used to pick clean style references |
 | `labeling/` | Streamlit manual-labeling UI |
 | `diffusion_model/` | The generation model — HANDWRITER stroke-level diffusion (arXiv:2011.06704), IAM-pretrained weights |
-| `diffusion_model/stroke_reconstruct.py` | **NEW** — reconstruct approximate online strokes `(dx, dy, pen_up)` from offline line crops (skeletonize → trace → resample) |
-| `diffusion_model/build_train_data.py` | **NEW** — assemble per-user training pickles in the model's exact input format |
-| `diffusion_model/finetune.py` | **NEW** — per-user decoder fine-tuning (loads IAM base, low LR, short runs) |
-| `diffusion_model/renderer.py` | **NEW** — high-quality ink renderer (variable stroke width, paper styles) replacing the matplotlib output |
-| `diffusion_model/generate_page.py` | **NEW** — full-page generation: per-user weights + style line, word-wrap, best-of-N with a legibility gate |
-| `app/` | **NEW** — local Streamlit web app: upload → segment → transcribe → reconstruct → fine-tune → generate → download |
+| `diffusion_model/stroke_reconstruct.py` | Reconstruct approximate online strokes `(dx, dy, pen_up)` from offline line crops (skeletonize → trace → resample) |
+| `diffusion_model/build_train_data.py` | Assemble per-user training pickles in the model's exact input format |
+| `diffusion_model/finetune.py` | Per-user decoder fine-tuning (loads IAM base, low LR, short runs) |
+| `diffusion_model/renderer.py` | High-quality ink renderer (variable stroke width, paper styles) replacing the matplotlib output |
+| `diffusion_model/generate_page.py` | Full-page generation: per-user weights + style line, word-wrap, best-of-N with a legibility gate — shared by both workflows |
+| `app/` | Local Streamlit web app (Workflow A): upload → segment → transcribe → reconstruct → fine-tune → generate → download |
 | `data/` | Raw page photos, per writer (kirsh, mayra, alizeh, random) |
 | `dataset/` | Labeled character crops (for the classifier) |
+| `api/server.py` | Workflow B backend — FastAPI, exposes `/api/generate` and `/api/analyze-style` for the Inkmimic apps over the same diffusion core |
+| `inkmimic/inkmimic/` | Inkmimic web app — React + Vite + Tailwind + Supabase |
+| `inkmimic-mobile/` | Inkmimic mobile app — Expo + React Native, mirrors the web app |
+| `packages/inkmimic-core/` | npm workspace package shared by both Inkmimic apps — session/auth + the `api/server.py` client |
 
 ## Setup
 
@@ -101,6 +119,33 @@ Note: `segment.py` on its own outputs per-*character* crops. For line-level
 crops + strokes, use `stroke_reconstruct.py --page` (or the web app), which
 drives `segment.py` internally and rebuilds full-line crops.
 
+## Running the product (Inkmimic)
+
+Workflow B — no per-writer fine-tuning, just style transfer from whatever
+sample image the request supplies (or the default IAM style line if none is
+given). Uses the same `venv` from [Setup](#setup) for the backend.
+
+```bash
+# 1. Backend (from the repo root, venv active)
+uvicorn api.server:app --host 0.0.0.0 --port 8000 --reload
+
+# 2. Web app
+cd inkmimic/inkmimic
+npm install
+cp .env.example .env   # fill in Supabase keys, or leave unset for local mode
+npm run dev
+
+# 3. Mobile app (instead of, or alongside, the web app)
+cd inkmimic-mobile
+npm install
+cp .env.example .env
+npx expo start
+```
+
+See `inkmimic/inkmimic/README.md` and `inkmimic-mobile/README.md` for
+per-app details (Supabase setup, project structure), and
+`docs/adr/workflow.md` for how a request flows end to end.
+
 ## Training-data format
 
 `build_train_data.py` writes pickles that `diffusion_model/utils.py:preprocess_data()`
@@ -131,10 +176,14 @@ outside it (parens, `$`, `&`, `@`, …) are flagged and replaced with `_`.
 
 ## Docs
 
-- `CONTEXT.md` — project glossary (start here in a new session)
-- `docs/adr/workflow.md` — the two actual end-to-end workflows (research pipeline vs. product)
+- `CONTEXT.md` — project glossary, covers both workflows (start here in a new session)
+- `docs/adr/workflow.md` — the two actual end-to-end workflows (research pipeline vs. product) in full detail
 - `docs/adr/` — architecture decision records (why things are built the way they are)
+- `RUNBOOK.md` — step-by-step operating manual for the research pipeline (Workflow A)
+- `TESTING_GUIDE.md` — how to test the generation pipeline
 - `plan.md` — how the diffusion backbone was chosen over a from-scratch GAN
 - `diffusion_model/INTEGRATION_GUIDE.md` — how the pieces connect
+- `diffusion_model/UPSTREAM_README.md` — the original HANDWRITER paper's README
 - `summary.txt` — the full model & data audit (2026-08-05)
 - `docs/archive/` — superseded files kept for the FYP writeup
+- `inkmimic/inkmimic/README.md`, `inkmimic-mobile/README.md` — per-app docs for the Inkmimic product (Workflow B)
