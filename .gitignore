@@ -1,4 +1,5 @@
 venv/
+.venv/
 __pycache__/
 *.pyc
 training/emnist_data/
@@ -19,3 +20,19 @@ diffusion_model/paragraph_result/
 diffusion_model/result.png
 app/users/alizeh/weights/model_alizeh_step*.weights.h5
 node_modules
+
+# Local configuration and credentials
+.env*
+!.env.example
+
+# Generated files
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage/
+dist/
+build/
+.expo/
+.vite/
+*.egg-info/
